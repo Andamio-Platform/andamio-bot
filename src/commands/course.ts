@@ -21,19 +21,19 @@ export const data = new SlashCommandBuilder()
   .setName('course')
   .setDescription('Get information about an Andamio course')
   .addStringOption(option => 
-    option.setName('coursecode')
-      .setDescription('The course code to look up')
+    option.setName('coursenftpolicyid')
+      .setDescription('The Course NFT Policy Id to look up')
       .setRequired(true));
 
 export async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
   await interaction.deferReply();
   
   try {
-    // Get the course code from the command options
-    const courseCode = interaction.options.getString('coursecode', true);
+    // Get the course NFT policy ID from the command options
+    const courseNftPolicyId = interaction.options.getString('coursenftpolicyid', true);
     
     // Make the API request
-    const response = await axios.get<CourseResponse>(`https://preprod.andamio.io/api/course/${courseCode}`);
+    const response = await axios.get<CourseResponse>(`https://preprod.andamio.io/api/course/nft/${courseNftPolicyId}`);
     const courseData = response.data;
     
     // Create an embed with the course information
@@ -42,6 +42,7 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
       .setTitle(`Course: ${courseData.course}`)
       .addFields(
         { name: 'Course Code', value: courseData.coursecode, inline: true },
+        { name: 'Course NFT Policy Id', value: courseNftPolicyId, inline: true },
         { name: 'Status', value: courseData.message, inline: true }
       )
       .setTimestamp()
@@ -57,7 +58,7 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
       
       // Handle 404 errors specifically
       if (axiosError.response && axiosError.response.status === 404) {
-        await interaction.editReply('Course not found. Please check the course code and try again.');
+        await interaction.editReply('Course not found. Please check the Course NFT Policy Id and try again.');
       } else {
         // Handle other axios errors
         const status = axiosError.response ? axiosError.response.status : 'Unknown';

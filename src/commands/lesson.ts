@@ -30,8 +30,8 @@ export const data = new SlashCommandBuilder()
   .setName('lesson')
   .setDescription('Get information about an Andamio lesson')
   .addStringOption(option => 
-    option.setName('coursecode')
-      .setDescription('The course code to look up')
+    option.setName('coursenftpolicyid')
+      .setDescription('The Course NFT Policy Id to look up')
       .setRequired(true))
   .addStringOption(option => 
     option.setName('modulecode')
@@ -47,13 +47,13 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
   
   try {
     // Get the parameters from the command options
-    const courseCode = interaction.options.getString('coursecode', true);
+    const courseNftPolicyId = interaction.options.getString('coursenftpolicyid', true);
     const moduleCode = interaction.options.getString('modulecode', true);
     const moduleIndex = interaction.options.getString('moduleindex', true);
     
     // Make the API request
     const response = await axios.get<LessonResponse>(
-      `https://preprod.andamio.io/api/course/${courseCode}/${moduleCode}/${moduleIndex}`
+      `https://preprod.andamio.io/api/course/nft/${courseNftPolicyId}/${moduleCode}/${moduleIndex}`
     );
     const lessonData = response.data;
     
@@ -64,6 +64,7 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
       .setDescription(lessonData.firstParagraphText)
       .addFields(
         { name: 'Course Code', value: lessonData.coursecode, inline: true },
+        { name: 'Course NFT Policy Id', value: courseNftPolicyId, inline: true },
         { name: 'Module Code', value: lessonData.modulecode, inline: true },
         { name: 'Lesson Number', value: lessonData.moduleindex, inline: true },
         { name: 'Status', value: lessonData.message, inline: true }
@@ -93,7 +94,7 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
       
       // Handle 404 errors specifically
       if (axiosError.response && axiosError.response.status === 404) {
-        await interaction.editReply('Lesson not found. Please check the course code, module code, and module index and try again.');
+        await interaction.editReply('Lesson not found. Please check the Course NFT Policy Id, module code, and module index and try again.');
       } else {
         // Handle other axios errors
         const status = axiosError.response ? axiosError.response.status : 'Unknown';

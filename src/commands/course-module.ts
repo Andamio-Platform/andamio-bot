@@ -39,8 +39,8 @@ export const data = new SlashCommandBuilder()
   .setName('module')
   .setDescription('Get information about an Andamio course module')
   .addStringOption(option => 
-    option.setName('coursecode')
-      .setDescription('The course code to look up')
+    option.setName('coursenftpolicyid')
+      .setDescription('The Course NFT Policy Id to look up')
       .setRequired(true))
   .addStringOption(option => 
     option.setName('modulecode')
@@ -51,12 +51,12 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
   await interaction.deferReply();
   
   try {
-    // Get the course code and module code from the command options
-    const courseCode = interaction.options.getString('coursecode', true);
+    // Get the course NFT policy ID and module code from the command options
+    const courseNftPolicyId = interaction.options.getString('coursenftpolicyid', true);
     const moduleCode = interaction.options.getString('modulecode', true);
     
     // Make the API request
-    const response = await axios.get<ModuleResponse>(`https://preprod.andamio.io/api/course/${courseCode}/${moduleCode}`);
+    const response = await axios.get<ModuleResponse>(`https://preprod.andamio.io/api/course/nft/${courseNftPolicyId}/${moduleCode}`);
     const moduleData = response.data;
     
     // Create an embed with the module information
@@ -65,6 +65,7 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
       .setTitle(`Module: ${moduleData.module}`)
       .setDescription(`Part of course: ${moduleData.coursecode}`)
       .addFields(
+        { name: 'Course NFT Policy Id', value: courseNftPolicyId, inline: true },
         { name: 'Module Code', value: moduleData.modulecode, inline: true },
         { name: 'Status', value: moduleData.message, inline: true },
         { name: 'Number of SLTs', value: moduleData.slts.length.toString(), inline: true },
@@ -112,7 +113,7 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
       
       // Handle 404 errors specifically
       if (axiosError.response && axiosError.response.status === 404) {
-        await interaction.editReply('Module not found. Please check the course code and module code and try again.');
+        await interaction.editReply('Module not found. Please check the Course NFT Policy Id and module code and try again.');
       } else {
         // Handle other axios errors
         const status = axiosError.response ? axiosError.response.status : 'Unknown';
