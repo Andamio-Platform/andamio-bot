@@ -90,6 +90,9 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
       time: 60000 
     });
 
+    // Flag to track if the user has successfully interacted with the command
+    let hasUserInteracted = false;
+
     // Store the user ID and course NFT policy ID for modal handling
     const userData = {
       userId: interaction.user.id,
@@ -224,6 +227,9 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
         return;
       }
 
+      // Mark that the user has successfully interacted
+      hasUserInteracted = true;
+
       const selectedCourseCode = i.values[0];
       const selectedCourse = coursesData.courses.find(course => course.courseCode === selectedCourseCode);
 
@@ -333,15 +339,18 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
       }
     });
 
-    collector.on('end', async () => {
-      // Check if the message still exists and is editable
-      try {
-        await interaction.editReply({ 
-          content: 'Course selection timed out. Use the /courses command again to view available courses.', 
-          components: [] 
-        });
-      } catch (error) {
-        console.error('Error updating message after timeout:', error);
+    collector.on('end', async (collected) => {
+      // Only show timeout message if the user hasn't interacted
+      if (!hasUserInteracted && collected.size === 0) {
+        // Check if the message still exists and is editable
+        try {
+          await interaction.editReply({ 
+            content: 'Course selection timed out. Use the /courses command again to view available courses.', 
+            components: [] 
+          });
+        } catch (error) {
+          console.error('Error updating message after timeout:', error);
+        }
       }
       
       // Remove the event listener when done
