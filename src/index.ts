@@ -1,12 +1,23 @@
-import { Client, Collection, Events, GatewayIntentBits, ClientOptions, ChatInputCommandInteraction, RESTPostAPIApplicationCommandsJSONBody } from 'discord.js';
-import * as dotenv from 'dotenv';
 import * as fs from 'fs';
 import * as path from 'path';
 
-// Load environment variables
-dotenv.config();
+import {
+  ChatInputCommandInteraction,
+  Client,
+  ClientOptions,
+  Collection,
+  Events,
+  GatewayIntentBits,
+  RESTPostAPIApplicationCommandsJSONBody,
+} from 'discord.js';
 
-// Define command interface
+import { loadConfig } from './config';
+import { openDb } from './db/index';
+import { setDb } from './db/handle';
+import { loadMappings } from './gating/mappings';
+import { initGating, reevaluateAll, reevaluateMember } from './gating/triggers';
+import { startCallbackServer } from './web/server';
+
 interface Command {
   data: {
     name: string;
@@ -15,7 +26,6 @@ interface Command {
   execute: (interaction: ChatInputCommandInteraction) => Promise<void>;
 }
 
-// Define a new type that extends Client to include commands
 class BotClient extends Client {
   public commands: Collection<string, Command>;
 
@@ -25,79 +35,121 @@ class BotClient extends Client {
   }
 }
 
-// Check if token is available
-const token = process.env.DISCORD_TOKEN;
-if (!token) {
-  console.error('Discord token is missing! Make sure to set DISCORD_TOKEN in your .env file');
-  process.exit(1);
+/** Port the callback web server listens on. */
+const WEB_PORT = Number(process.env.PORT ?? 3000);
+
+/** Default periodic gating-sweep interval: 15 minutes. */
+const DEFAULT_SWEEP_INTERVAL_MS = 15 * 60 * 1000;
+
+/**
+ * Periodic sweep interval in ms, from `GATING_SWEEP_INTERVAL_MS` if set and a
+ * positive number, otherwise the 15-minute default.
+ */
+function sweepIntervalMs(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.GATING_SWEEP_INTERVAL_MS;
+  if (raw === undefined || raw.trim() === '') return DEFAULT_SWEEP_INTERVAL_MS;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : DEFAULT_SWEEP_INTERVAL_MS;
 }
 
-// Create a new client instance
-const client = new BotClient({
-  intents: [
-    GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent,
-  ],
-});
+function loadCommands(client: BotClient): void {
+  const commandsPath = path.join(__dirname, 'commands');
+  const commandFiles = fs
+    .readdirSync(commandsPath)
+    .filter((file) => file.endsWith('.js') || file.endsWith('.ts'));
 
-// Load commands
-const commandsPath = path.join(__dirname, 'commands');
-const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js') || file.endsWith('.ts'));
-
-for (const file of commandFiles) {
-  const filePath = path.join(commandsPath, file);
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const command = require(filePath);
-  
-  // Set a new item in the Collection with the key as the command name and the value as the exported module
-  if ('data' in command && 'execute' in command) {
-    client.commands.set(command.data.name, command);
-  } else {
-    console.log(`[WARNING] The command at ${filePath} is missing a required "data" or "execute" property.`);
-  }
-}
-
-// When the client is ready, run this code (only once)
-client.once(Events.ClientReady, (readyClient) => {
-  console.log(`Ready! Logged in as ${readyClient.user.tag}`);
-});
-
-// Handle slash command interactions
-client.on(Events.InteractionCreate, async interaction => {
-  if (!interaction.isChatInputCommand()) return;
-
-  const command = client.commands.get(interaction.commandName);
-
-  if (!command) {
-    console.error(`No command matching ${interaction.commandName} was found.`);
-    return;
-  }
-
-  try {
-    await command.execute(interaction);
-  } catch (error) {
-    console.error(error);
-    if (interaction.replied || interaction.deferred) {
-      await interaction.followUp({ content: 'There was an error while executing this command!', ephemeral: true });
+  for (const file of commandFiles) {
+    const filePath = path.join(commandsPath, file);
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const command = require(filePath);
+    if ('data' in command && 'execute' in command) {
+      client.commands.set(command.data.name, command);
     } else {
-      await interaction.reply({ content: 'There was an error while executing this command!', ephemeral: true });
+      console.log(
+        `[WARNING] The command at ${filePath} is missing a "data" or "execute" property.`,
+      );
     }
   }
-});
+}
 
-// Handle messages for legacy commands (optional)
-client.on(Events.MessageCreate, async (message) => {
-  // Ignore messages from bots
-  if (message.author.bot) return;
-  
-  // Simple ping command
-  if (message.content.toLowerCase() === '!ping') {
-    await message.reply('Pong! (Note: Slash commands are now available. Try /ping instead)');
-  }
-});
+function main(): void {
+  // Fail fast on bad/missing config before touching Discord or the db.
+  const config = loadConfig();
 
-// Log in to Discord with your client's token
-client.login(token).catch((error) => {
-  console.error('Error logging in to Discord:', error);
-});
+  // Fail fast on an invalid role-mappings file too — gating must not start with
+  // a config it would silently misinterpret.
+  const mappings = loadMappings(config.roleMappingsPath);
+
+  // Open the db once and share the handle with reflectively-loaded commands.
+  const db = openDb(config.dbPath);
+  setDb(db);
+
+  // Start the callback web server alongside the bot.
+  startCallbackServer({ db, reevaluate: reevaluateMember }, WEB_PORT);
+
+  const client = new BotClient({
+    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers],
+  });
+
+  // Wire the gating triggers with their runtime dependencies (mirrors setDb).
+  initGating({ client, config, mappings });
+
+  loadCommands(client);
+
+  client.once(Events.ClientReady, (readyClient) => {
+    console.log(`Ready! Logged in as ${readyClient.user.tag}`);
+    console.log(
+      `Gating managing ${mappings.managedRoleIds.size} role(s) across ` +
+        `${mappings.rules.length} rule(s).`,
+    );
+
+    // Periodic sweep: re-evaluate every connected member so credentials earned
+    // (or lost) since their last interaction are reflected without a re-login.
+    const intervalMs = sweepIntervalMs();
+    setInterval(() => {
+      reevaluateAll().catch((err) =>
+        console.error('Gating: periodic sweep failed:', err),
+      );
+    }, intervalMs);
+    console.log(`Gating sweep scheduled every ${intervalMs}ms.`);
+  });
+
+  // Re-evaluate a member's roles when they (re)join the guild.
+  client.on(Events.GuildMemberAdd, (member) => {
+    reevaluateMember(member.id).catch((err) =>
+      console.error('Gating: guildMemberAdd re-evaluation failed:', err),
+    );
+  });
+
+  client.on(Events.InteractionCreate, async (interaction) => {
+    if (!interaction.isChatInputCommand()) return;
+
+    const command = client.commands.get(interaction.commandName);
+    if (!command) {
+      console.error(`No command matching ${interaction.commandName} was found.`);
+      return;
+    }
+
+    try {
+      await command.execute(interaction);
+    } catch (error) {
+      console.error(error);
+      const payload = {
+        content: 'There was an error while executing this command!',
+        ephemeral: true,
+      };
+      if (interaction.replied || interaction.deferred) {
+        await interaction.followUp(payload);
+      } else {
+        await interaction.reply(payload);
+      }
+    }
+  });
+
+  client.login(config.discordToken).catch((error) => {
+    console.error('Error logging in to Discord:', error);
+    process.exit(1);
+  });
+}
+
+main();

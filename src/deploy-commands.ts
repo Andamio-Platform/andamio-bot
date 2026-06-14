@@ -1,9 +1,10 @@
 import { REST, Routes, RESTPostAPIApplicationCommandsJSONBody } from 'discord.js';
-import * as dotenv from 'dotenv';
 import * as fs from 'fs';
 import * as path from 'path';
 
-dotenv.config();
+import { loadConfig } from './config';
+
+const config = loadConfig();
 
 const commands: RESTPostAPIApplicationCommandsJSONBody[] = [];
 const commandsPath = path.join(__dirname, 'commands');
@@ -23,7 +24,7 @@ for (const file of commandFiles) {
 }
 
 // Construct and prepare an instance of the REST module
-const rest = new REST().setToken(process.env.DISCORD_TOKEN as string);
+const rest = new REST().setToken(config.discordToken);
 
 // Deploy commands
 (async () => {
@@ -32,10 +33,7 @@ const rest = new REST().setToken(process.env.DISCORD_TOKEN as string);
 
     // The put method is used to fully refresh all commands
     const data = await rest.put(
-      Routes.applicationGuildCommands(
-        process.env.CLIENT_ID as string,
-        process.env.GUILD_ID as string
-      ),
+      Routes.applicationGuildCommands(config.discordAppId, config.guildId),
       { body: commands },
     );
 
