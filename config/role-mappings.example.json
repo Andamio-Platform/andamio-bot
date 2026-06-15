@@ -1,0 +1,20 @@
+[
+  {
+    "type": "enrolled",
+    "course_id": "course_cardano_101",
+    "role_id": "111111111111111111"
+  },
+  {
+    "type": "course-complete",
+    "course_id": "course_cardano_101",
+    "role_id": "222222222222222222"
+  },
+  {
+    "type": "credential",
+    "course_id": "course_cardano_101",
+    "slt_hash": "slt_hash_intro_to_plutus",
+    "role_id": "333333333333333333",
+    "label": "Andamio Developer",
+    "earn_url": "https://app.andamio.io/courses/course_cardano_101"
+  }
+]

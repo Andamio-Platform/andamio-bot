@@ -12,3 +12,5 @@ docker-compose.yml
 .vscode
 logs
 tmp
+data
+*.sqlite
