@@ -97,70 +97,75 @@ Every variable, what it's for, and an example value:
 > your deployment (the known API host is `preprod.api.andamio.io`).
 > `BOT_CALLBACK_BASE_URL` is **your** bot's public origin.
 
-## 3. Author your role mappings
+## 3. Configure credential gating (`role-mappings.json`)
 
-`role-mappings.json` (path set by `ROLE_MAPPINGS_PATH`) is a JSON **array** of
-rules. Each rule grants one `role_id` when its credential condition is met. The
-set of `role_id`s across all rules is the bot's **managed set** — the only roles
-it will ever add or remove.
+This is the one file you edit to decide **which Andamio credential unlocks which
+Discord role**. It is **committed to the repo on purpose** — it is config, not a
+secret, so it is version-controlled (diffs, review, rollback). `ROLE_MAPPINGS_PATH`
+points at it (`./config/role-mappings.json` by default).
 
-Start from the example:
+> **Forking this bot?** Edit `config/role-mappings.json` directly — that is the
+> whole setup. The committed file ships with the Andamio **demo** config (one
+> rule gating an "Andamio Developer" channel) using `REPLACE_WITH_…`
+> placeholders; swap in your own values and you are done.
+> `config/role-mappings.example.json` is a separate, annotated reference showing
+> all three rule types — copy from it if you want more rules.
 
-```
-cp config/role-mappings.example.json config/role-mappings.json
-```
+It is a JSON **array** of rules. Each rule grants one `role_id` when its
+condition is met. The set of all `role_id`s across rules is the bot's **managed
+set** — the *only* roles it ever adds or removes (it never touches a
+moderator/booster/etc. role).
 
-There are three rule types — one documented example of each:
+### Fields
 
-```json
-[
-  {
-    "type": "enrolled",
-    "course_id": "course_cardano_101",
-    "role_id": "111111111111111111"
-  },
-  {
-    "type": "course-complete",
-    "course_id": "course_cardano_101",
-    "role_id": "222222222222222222"
-  },
-  {
-    "type": "credential",
-    "course_id": "course_cardano_101",
-    "slt_hash": "slt_hash_intro_to_plutus",
-    "role_id": "333333333333333333",
-    "label": "Andamio Developer",
-    "earn_url": "https://app.andamio.io/courses/course_cardano_101"
-  }
-]
-```
+| Field | Required | What it is | Where to get it |
+|---|---|---|---|
+| `type` | yes | `enrolled`, `course-complete`, or `credential` (see below) | — |
+| `course_id` | yes | The Andamio course the rule keys on | From your Andamio course / the andamioscan API |
+| `slt_hash` | only for `credential` | The specific credential within the course | From the course's credential definition |
+| `role_id` | yes | The Discord role to grant | Discord → enable Developer Mode → right-click the role → Copy Role ID |
+| `label` | no | Human name for the gate (e.g. `"Andamio Developer"`), used in the `/credentials` earn-it hint | You choose it |
+| `earn_url` | no | http(s) link to earn what the rule requires | Your course/credential's public page |
+
+### Rule types
 
 - **`enrolled`** — grant `role_id` when the member is enrolled in (or has
   completed) `course_id`.
 - **`course-complete`** — grant `role_id` when the member has **completed**
   `course_id`.
 - **`credential`** — grant `role_id` when the member has completed `course_id`
-  **and** holds the specific credential `slt_hash`. `slt_hash` is **required**
-  for this type.
+  **and** holds the specific credential `slt_hash`. `slt_hash` is **required**.
 
-Two **optional** fields turn an unmet gate into a call to action (they never
-affect gating):
+The two optional fields (`label`, `earn_url`) **never affect gating** — they only
+drive the call to action. When `earn_url` is set, `/credentials` shows it to a
+connected member who does **not** yet satisfy the rule, so non-holders see
+exactly how to unlock the gated channel (de-duped by URL across rules); `label`
+names the gate there, falling back to the course display name when absent.
 
-- **`label`** — a human name for what the rule grants (e.g. `"Andamio
-  Developer"`). Used in the `/credentials` earn-it hint; falls back to the
-  course display name when absent.
-- **`earn_url`** — an http(s) URL to earn what the rule requires. When set,
-  `/credentials` shows it to a connected member who does **not** yet satisfy the
-  rule, so non-holders see exactly how to unlock the gated channel. De-duped by
-  URL across rules.
+### The demo config (what ships)
 
-Get the `role_id`s from your server (enable Developer Mode, right-click a role
-> Copy Role ID). The config is **strictly validated at startup** — a missing
-`course_id`/`role_id`, an unknown `type`, a `credential` rule without
-`slt_hash`, a non-http(s) `earn_url`, or an empty `label` fails fast with a
-message naming the offending rule.
+```json
+[
+  {
+    "type": "credential",
+    "course_id": "REPLACE_WITH_DEVELOPER_COURSE_ID",
+    "slt_hash": "REPLACE_WITH_DEVELOPER_CREDENTIAL_SLT_HASH",
+    "role_id": "REPLACE_WITH_DISCORD_ROLE_ID",
+    "label": "Andamio Developer",
+    "earn_url": "https://app.andamio.io/courses/REPLACE_WITH_DEVELOPER_COURSE_ID"
+  }
+]
+```
 
-See `config/role-mappings.example.json` in this repo for the canonical example.
+Replace the three `REPLACE_WITH_…` values (course id, credential slt hash, and
+your Discord role id) and the bot gates that channel on that credential.
+
+### Validation
+
+The config is **strictly validated at startup** and fails fast, naming the
+offending rule, on: a non-array top level, an unknown/missing `type`, a missing
+`course_id`/`role_id`, a `credential` rule without `slt_hash`, a non-http(s)
+`earn_url`, or an empty `label`. A typo can never silently disable gating.
 
 ## 4. Install, build, deploy commands, run
 

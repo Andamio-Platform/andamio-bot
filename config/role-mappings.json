@@ -1,0 +1,10 @@
+[
+  {
+    "type": "credential",
+    "course_id": "REPLACE_WITH_DEVELOPER_COURSE_ID",
+    "slt_hash": "REPLACE_WITH_DEVELOPER_CREDENTIAL_SLT_HASH",
+    "role_id": "REPLACE_WITH_DISCORD_ROLE_ID",
+    "label": "Andamio Developer",
+    "earn_url": "https://app.andamio.io/courses/REPLACE_WITH_DEVELOPER_COURSE_ID"
+  }
+]

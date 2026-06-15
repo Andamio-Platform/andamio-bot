@@ -170,6 +170,20 @@ describe('loadMappings — file loading', () => {
     expect(() => loadMappings(file)).toThrow(/slt_hash/i);
   });
 
+  it('validates the committed demo config (config/role-mappings.json)', () => {
+    const demo = path.join(
+      __dirname,
+      '..',
+      '..',
+      'config',
+      'role-mappings.json',
+    );
+    // The demo config is committed and deploy-critical; it must always parse,
+    // even with REPLACE_WITH_… placeholders still in place.
+    const m = loadMappings(demo);
+    expect(Array.isArray(m.rules)).toBe(true);
+  });
+
   it('validates the shipped example config', () => {
     const example = path.join(
       __dirname,
