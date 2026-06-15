@@ -13,9 +13,11 @@ RUN npm ci
 COPY . .
 RUN npm run build
 
-# SQLite (links + refresh tokens) lives here — mount a PERSISTENT volume at this
-# path on the host, or every redeploy wipes connections and refresh tokens.
-VOLUME ["/app/data"]
+# SQLite (links + refresh tokens) lives at DB_PATH=/app/data/bot.sqlite. Attach a
+# PERSISTENT volume mounted at /app/data, or every redeploy wipes connections and
+# refresh tokens. NOTE: do not declare a Dockerfile `VOLUME` — Railway rejects it
+# ("VOLUME ... is not supported, use Railway Volumes"); configure the mount in the
+# host (Railway: add a Volume at /app/data). Other hosts: `docker run -v ...`.
 
 # The callback web server binds to $PORT (host-injected), default 3000.
 EXPOSE 3000
