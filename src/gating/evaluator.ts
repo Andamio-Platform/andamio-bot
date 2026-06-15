@@ -23,7 +23,7 @@ export interface RoleDiff {
 }
 
 /** True if `state` satisfies a single rule (so its `role_id` is desired). */
-function ruleSatisfied(rule: MappingRule, state: UserState): boolean {
+export function ruleSatisfied(rule: MappingRule, state: UserState): boolean {
   const completed = state.completedCourses.find(
     (c) => c.courseId === rule.course_id,
   );

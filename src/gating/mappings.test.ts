@@ -32,6 +32,29 @@ describe('parseMappings — valid config', () => {
     expect(enrolled?.slt_hash).toBeUndefined();
   });
 
+  it('accepts optional earn_url and label and retains them', () => {
+    const m = parseMappings([
+      {
+        type: 'credential',
+        course_id: 'c1',
+        slt_hash: 's',
+        role_id: 'r',
+        earn_url: 'https://app.andamio.io/earn',
+        label: 'Andamio Developer',
+      },
+    ]);
+    expect(m.rules[0].earn_url).toBe('https://app.andamio.io/earn');
+    expect(m.rules[0].label).toBe('Andamio Developer');
+  });
+
+  it('leaves earn_url and label undefined when absent', () => {
+    const m = parseMappings([
+      { type: 'enrolled', course_id: 'c1', role_id: 'r' },
+    ]);
+    expect(m.rules[0].earn_url).toBeUndefined();
+    expect(m.rules[0].label).toBeUndefined();
+  });
+
   it('dedupes role ids across rules in the managed set', () => {
     const m = parseMappings([
       { type: 'enrolled', course_id: 'c1', role_id: 'shared' },
@@ -77,6 +100,30 @@ describe('parseMappings — invalid config fails with a clear message', () => {
         { type: 'credential', course_id: 'c1', role_id: 'r' },
       ]),
     ).toThrow(/slt_hash/i);
+  });
+
+  it('rejects a non-http(s) earn_url', () => {
+    expect(() =>
+      parseMappings([
+        { type: 'enrolled', course_id: 'c1', role_id: 'r', earn_url: 'ftp://x' },
+      ]),
+    ).toThrow(/earn_url/i);
+  });
+
+  it('rejects a malformed earn_url', () => {
+    expect(() =>
+      parseMappings([
+        { type: 'enrolled', course_id: 'c1', role_id: 'r', earn_url: 'not a url' },
+      ]),
+    ).toThrow(/earn_url/i);
+  });
+
+  it('rejects an empty label', () => {
+    expect(() =>
+      parseMappings([
+        { type: 'enrolled', course_id: 'c1', role_id: 'r', label: '   ' },
+      ]),
+    ).toThrow(/label/i);
   });
 
   it('names the offending rule index in the message', () => {

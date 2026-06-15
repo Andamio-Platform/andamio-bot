@@ -20,7 +20,7 @@ own Discord guild and an Andamio (preprod) deployment with **no code changes**.
 |---------|--------------|
 | `/login` | Replies with an ephemeral link to the Andamio hosted login. The member authenticates in their browser; the app redirects the result back to the bot, which stores `discord_id ↔ alias`. Re-running it re-links. |
 | `/logout` | Unlinks the member's Discord account from their Andamio alias. |
-| `/credentials` | Shows the member their connection status, alias, and earned credentials grouped by course (ephemeral). |
+| `/credentials` | Shows the member their connection status, alias, and earned credentials grouped by course (ephemeral). Also lists any gated credentials they have not yet earned, with a link to earn each (when `earn_url` is set in the mappings). |
 | `/refresh` | Re-checks the member's Andamio credentials and updates their roles on demand. |
 
 **How it works**
@@ -128,7 +128,9 @@ There are three rule types — one documented example of each:
     "type": "credential",
     "course_id": "course_cardano_101",
     "slt_hash": "slt_hash_intro_to_plutus",
-    "role_id": "333333333333333333"
+    "role_id": "333333333333333333",
+    "label": "Andamio Developer",
+    "earn_url": "https://app.andamio.io/courses/course_cardano_101"
   }
 ]
 ```
@@ -141,10 +143,22 @@ There are three rule types — one documented example of each:
   **and** holds the specific credential `slt_hash`. `slt_hash` is **required**
   for this type.
 
+Two **optional** fields turn an unmet gate into a call to action (they never
+affect gating):
+
+- **`label`** — a human name for what the rule grants (e.g. `"Andamio
+  Developer"`). Used in the `/credentials` earn-it hint; falls back to the
+  course display name when absent.
+- **`earn_url`** — an http(s) URL to earn what the rule requires. When set,
+  `/credentials` shows it to a connected member who does **not** yet satisfy the
+  rule, so non-holders see exactly how to unlock the gated channel. De-duped by
+  URL across rules.
+
 Get the `role_id`s from your server (enable Developer Mode, right-click a role
 > Copy Role ID). The config is **strictly validated at startup** — a missing
-`course_id`/`role_id`, an unknown `type`, or a `credential` rule without
-`slt_hash` fails fast with a message naming the offending rule.
+`course_id`/`role_id`, an unknown `type`, a `credential` rule without
+`slt_hash`, a non-http(s) `earn_url`, or an empty `label` fails fast with a
+message naming the offending rule.
 
 See `config/role-mappings.example.json` in this repo for the canonical example.
 

@@ -35,6 +35,18 @@ export interface MappingRule {
   /** Required when `type` is `credential`; absent otherwise. */
   slt_hash?: string;
   role_id: string;
+  /**
+   * Optional http(s) URL where a member can earn what this rule requires. When
+   * set, `/credentials` shows it to a connected member who does NOT yet satisfy
+   * the rule, turning the gate into a call to action. Never affects gating.
+   */
+  earn_url?: string;
+  /**
+   * Optional human label for what the rule grants/requires (e.g. "Andamio
+   * Developer"). Used in the `/credentials` earn-it hint; falls back to the
+   * course display name when absent.
+   */
+  label?: string;
 }
 
 /** A loaded, validated set of rules plus the derived managed-role set. */
@@ -46,6 +58,18 @@ export interface Mappings {
 
 function isNonEmptyString(v: unknown): v is string {
   return typeof v === 'string' && v.trim() !== '';
+}
+
+/** True if `v` is a non-empty string that parses as an http(s) URL. */
+function isValidHttpUrl(v: unknown): v is string {
+  if (!isNonEmptyString(v)) return false;
+  let parsed: URL;
+  try {
+    parsed = new URL(v);
+  } catch {
+    return false;
+  }
+  return parsed.protocol === 'http:' || parsed.protocol === 'https:';
 }
 
 /**
@@ -102,12 +126,28 @@ export function parseMappings(parsed: unknown): Mappings {
       );
     }
 
+    if (r.earn_url !== undefined && !isValidHttpUrl(r.earn_url)) {
+      throw new Error(
+        `Invalid role-mappings config: ${where} has an "earn_url" that is not ` +
+          `a valid http(s) URL (got ${JSON.stringify(r.earn_url)}).`,
+      );
+    }
+
+    if (r.label !== undefined && !isNonEmptyString(r.label)) {
+      throw new Error(
+        `Invalid role-mappings config: ${where} has a "label" that is not a ` +
+          `non-empty string (got ${JSON.stringify(r.label)}).`,
+      );
+    }
+
     const rule: MappingRule = {
       type,
       course_id: r.course_id,
       role_id: r.role_id,
     };
     if (type === 'credential') rule.slt_hash = r.slt_hash as string;
+    if (r.earn_url !== undefined) rule.earn_url = r.earn_url as string;
+    if (r.label !== undefined) rule.label = r.label as string;
 
     rules.push(rule);
     managedRoleIds.add(r.role_id);
