@@ -10,14 +10,17 @@ import {
 } from 'vitest';
 
 import { renderCredentialsEmbed } from './credentials';
-import type { UserState } from '../andamio/scan-client';
+import type { UserState } from '../andamio/dashboard-client';
 import type { Mappings, MappingRule } from '../gating/mappings';
 
 // --- module mocks ----------------------------------------------------------
 
 vi.mock('../config', () => ({
   loadConfig: () => ({
-    scanBaseUrl: 'https://scan.test',
+    andamioApiBaseUrl: 'https://api.test',
+    andamioApiKey: 'ant_mn_test-key',
+    appLoginBaseUrl: 'https://app.test',
+    botCallbackBaseUrl: 'https://bot.test',
     roleMappingsPath: '/tmp/role-mappings.json',
   }),
 }));
@@ -39,18 +42,43 @@ vi.mock('../db/links', () => ({
   getLinkByDiscordId: (...args: unknown[]) => getLinkByDiscordId(...args),
 }));
 
-const getUserState = vi.fn();
-vi.mock('../andamio/scan-client', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../andamio/scan-client')>();
+const getUserDashboard = vi.fn();
+vi.mock('../andamio/dashboard-client', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('../andamio/dashboard-client')>();
   return {
     ...actual,
-    getUserState: (...args: unknown[]) => getUserState(...args),
+    getUserDashboard: (...args: unknown[]) => getUserDashboard(...args),
   };
 });
 
+// The Connect-button helper is unit-tested separately; here we just assert it
+// is invoked (and with which variant), so stub it to a recognizable payload.
+const buildReloginPrompt = vi.fn(
+  (_db: unknown, _id: string, _app: string, _bot: string, variant = 'connect') => ({
+    content: `relogin:${variant}`,
+    components: ['ROW'],
+  }),
+);
+vi.mock('../discord/relogin-prompt', () => ({
+  buildReloginPrompt: (...args: unknown[]) =>
+    buildReloginPrompt(...(args as Parameters<typeof buildReloginPrompt>)),
+}));
+
 // Imported after the mocks above are registered.
 import { execute } from './credentials';
-import { ScanError } from '../andamio/scan-client';
+import { ApiError } from '../andamio/dashboard-client';
+
+/** A link with a valid (far-future) JWT — the happy-path precondition. */
+const FUTURE = Date.now() + 60 * 60 * 1000;
+const linkedJwt = (alias = 'alice') => ({
+  discord_id: 'discord-1',
+  alias,
+  user_jwt: 'header.payload.sig',
+  jwt_expires_at: FUTURE,
+  refresh_token: null,
+  updated_at: 0,
+});
 
 // --- helpers ---------------------------------------------------------------
 
@@ -77,7 +105,8 @@ const mappingsOf = (rules: MappingRule[]): Mappings => ({
 
 beforeEach(() => {
   getLinkByDiscordId.mockReset();
-  getUserState.mockReset();
+  getUserDashboard.mockReset();
+  buildReloginPrompt.mockClear();
   loadMappings.mockReset();
   loadMappings.mockReturnValue({ rules: [], managedRoleIds: new Set<string>() });
 });
@@ -89,22 +118,67 @@ afterEach(() => {
 // --- execute() -------------------------------------------------------------
 
 describe('/credentials execute', () => {
-  it('not-connected user → /login prompt, and getUserState is NOT called', async () => {
+  it('not-connected user → Connect button, and getUserDashboard is NOT called', async () => {
     getLinkByDiscordId.mockReturnValue(null);
     const interaction = makeInteraction();
 
     await execute(interaction as never);
 
-    expect(getUserState).not.toHaveBeenCalled();
+    expect(getUserDashboard).not.toHaveBeenCalled();
+    expect(buildReloginPrompt).toHaveBeenCalledWith(
+      expect.anything(),
+      'discord-1',
+      'https://app.test',
+      'https://bot.test',
+      'connect',
+    );
     const payload = interaction.reply.mock.calls[0][0];
-    expect(payload.content).toContain('/login');
+    expect(payload.components).toEqual(['ROW']);
     expect(payload.flags).toBe(MessageFlags.Ephemeral);
     expect(payload.embeds).toBeUndefined();
   });
 
+  it('linked but no stored JWT → Connect button, no API call', async () => {
+    getLinkByDiscordId.mockReturnValue({ alias: 'alice', user_jwt: null });
+    const interaction = makeInteraction();
+
+    await execute(interaction as never);
+
+    expect(getUserDashboard).not.toHaveBeenCalled();
+    expect(buildReloginPrompt).toHaveBeenCalledWith(
+      expect.anything(),
+      'discord-1',
+      'https://app.test',
+      'https://bot.test',
+      'connect',
+    );
+    expect(interaction.reply.mock.calls[0][0].components).toEqual(['ROW']);
+  });
+
+  it('expired stored JWT → expired-variant Connect button, no API call', async () => {
+    getLinkByDiscordId.mockReturnValue({
+      alias: 'alice',
+      user_jwt: 'h.p.s',
+      jwt_expires_at: Date.now() - 1000,
+    });
+    const interaction = makeInteraction();
+
+    await execute(interaction as never);
+
+    expect(getUserDashboard).not.toHaveBeenCalled();
+    expect(buildReloginPrompt).toHaveBeenCalledWith(
+      expect.anything(),
+      'discord-1',
+      'https://app.test',
+      'https://bot.test',
+      'expired',
+    );
+    expect(interaction.reply.mock.calls[0][0].content).toBe('relogin:expired');
+  });
+
   it('AE5: connected alias with completed courses renders a grouped ephemeral embed', async () => {
-    getLinkByDiscordId.mockReturnValue({ alias: 'alice' });
-    getUserState.mockResolvedValue(
+    getLinkByDiscordId.mockReturnValue(linkedJwt('alice'));
+    getUserDashboard.mockResolvedValue(
       state({
         completedCourses: [
           { courseId: 'c1', claimedCredentials: ['s1', 's2'] },
@@ -117,7 +191,11 @@ describe('/credentials execute', () => {
 
     await execute(interaction as never);
 
-    expect(getUserState).toHaveBeenCalledWith('https://scan.test', 'alice');
+    expect(getUserDashboard).toHaveBeenCalledWith(
+      'https://api.test',
+      'ant_mn_test-key',
+      'header.payload.sig',
+    );
     const payload = interaction.reply.mock.calls[0][0];
     expect(payload.flags).toBe(MessageFlags.Ephemeral);
     expect(payload.embeds).toHaveLength(1);
@@ -134,8 +212,8 @@ describe('/credentials execute', () => {
   });
 
   it('only-enrolled (no completed) → enrolled section, zero credentials', async () => {
-    getLinkByDiscordId.mockReturnValue({ alias: 'bob' });
-    getUserState.mockResolvedValue(
+    getLinkByDiscordId.mockReturnValue(linkedJwt('bob'));
+    getUserDashboard.mockResolvedValue(
       state({ alias: 'bob', enrolledCourses: ['c9'] }),
     );
     const interaction = makeInteraction();
@@ -151,9 +229,9 @@ describe('/credentials execute', () => {
     expect(enrolled.value).toContain('c9');
   });
 
-  it('scan 404 → graceful ephemeral error, no crash', async () => {
-    getLinkByDiscordId.mockReturnValue({ alias: 'ghost' });
-    getUserState.mockRejectedValue(new ScanError('not-found', 'nope', 404));
+  it('API 404 → graceful ephemeral error naming the alias, no crash', async () => {
+    getLinkByDiscordId.mockReturnValue(linkedJwt('ghost'));
+    getUserDashboard.mockRejectedValue(new ApiError('not-found', 'nope', 404));
     const interaction = makeInteraction();
 
     await execute(interaction as never);
@@ -165,8 +243,8 @@ describe('/credentials execute', () => {
   });
 
   it('network error → graceful ephemeral error, no crash', async () => {
-    getLinkByDiscordId.mockReturnValue({ alias: 'alice' });
-    getUserState.mockRejectedValue(new ScanError('network', 'down'));
+    getLinkByDiscordId.mockReturnValue(linkedJwt('alice'));
+    getUserDashboard.mockRejectedValue(new ApiError('network', 'down'));
     const interaction = makeInteraction();
 
     await execute(interaction as never);
@@ -174,6 +252,22 @@ describe('/credentials execute', () => {
     const payload = interaction.reply.mock.calls[0][0];
     expect(payload.flags).toBe(MessageFlags.Ephemeral);
     expect(payload.content).toMatch(/try .*again|could not reach/i);
+  });
+
+  it('401 on a non-expired JWT → operator-key error logged, neutral message shown', async () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    getLinkByDiscordId.mockReturnValue(linkedJwt('alice'));
+    getUserDashboard.mockRejectedValue(new ApiError('unauthorized', '401', 401));
+    const interaction = makeInteraction();
+
+    await execute(interaction as never);
+
+    expect(errSpy).toHaveBeenCalled();
+    const payload = interaction.reply.mock.calls[0][0];
+    expect(payload.embeds).toBeUndefined();
+    expect(payload.content).toMatch(/trouble verifying|try .*again/i);
+    // The member is NOT bounced to reconnect for an operator-side fault.
+    expect(buildReloginPrompt).not.toHaveBeenCalled();
   });
 });
 
@@ -260,8 +354,8 @@ describe('renderCredentialsEmbed — earn-it hints', () => {
   });
 
   it('end-to-end: a connected non-holder gets the Earn more field via execute()', async () => {
-    getLinkByDiscordId.mockReturnValue({ alias: 'alice' });
-    getUserState.mockResolvedValue(state());
+    getLinkByDiscordId.mockReturnValue(linkedJwt('alice'));
+    getUserDashboard.mockResolvedValue(state());
     loadMappings.mockReturnValue(mappingsOf([devRule]));
     const interaction = makeInteraction();
 
