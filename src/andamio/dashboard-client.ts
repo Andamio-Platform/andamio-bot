@@ -59,6 +59,39 @@ function toStringArray(value: unknown): string[] {
   return value.filter((v): v is string => typeof v === 'string');
 }
 
+/**
+ * Detect a degraded success response that should NOT be trusted for role
+ * removal: the `student` block missing/not-an-object, or one of its expected
+ * course arrays present-but-wrong-shaped (a contract drift, e.g. array→object).
+ *
+ * This is the empty-/malformed-200 counterpart to HTTP 206: a member who
+ * genuinely has no credentials comes back as a present `student` with empty
+ * arrays (not degraded), so they still gate correctly; a thin/garbled body is
+ * treated as partial so the sweep declines to strip roles on bad data.
+ */
+function isDegraded(body: unknown): boolean {
+  const data =
+    typeof body === 'object' && body !== null
+      ? (body as { data?: unknown }).data
+      : undefined;
+  const student =
+    typeof data === 'object' && data !== null
+      ? (data as { student?: unknown }).student
+      : undefined;
+  if (typeof student !== 'object' || student === null) return true;
+  const s = student as Record<string, unknown>;
+  for (const field of [
+    'enrolled_courses',
+    'completed_courses',
+    'credentials_by_course',
+  ]) {
+    // Absent (undefined) is fine — a legitimately empty member omits it.
+    // Present-but-not-an-array signals a degraded/changed contract.
+    if (s[field] !== undefined && !Array.isArray(s[field])) return true;
+  }
+  return false;
+}
+
 /** Read `course_id` from a raw `{ course_id, ... }` entry, or null if absent. */
 function courseIdOf(raw: unknown): string | null {
   if (typeof raw !== 'object' || raw === null) return null;
@@ -195,8 +228,6 @@ export async function getUserDashboard(
     );
   }
 
-  const partial = response.status === 206;
-
   let body: unknown;
   try {
     body = await response.json();
@@ -207,6 +238,10 @@ export async function getUserDashboard(
       response.status,
     );
   }
+
+  // Partial when the API explicitly says so (206) OR the body is degraded
+  // (missing/malformed student block) — both must not drive role removal.
+  const partial = response.status === 206 || isDegraded(body);
 
   return { state: mapDashboard(body), partial };
 }

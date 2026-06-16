@@ -95,11 +95,16 @@ export function deleteLink(db: Db, discordId: string): void {
  * cannot accumulate orphaned rows.
  */
 export function createPending(db: Db, state: string, discordId: string): void {
-  db.prepare(`DELETE FROM pending_logins WHERE discord_id = ?`).run(discordId);
-  db.prepare(
-    `INSERT INTO pending_logins (state, discord_id, created_at)
-     VALUES (?, ?, ?)`,
-  ).run(state, discordId, Date.now());
+  // Atomic delete-then-insert so the "one live login per member" invariant
+  // holds even under a future multi-process deployment.
+  const tx = db.transaction((s: string, d: string) => {
+    db.prepare(`DELETE FROM pending_logins WHERE discord_id = ?`).run(d);
+    db.prepare(
+      `INSERT INTO pending_logins (state, discord_id, created_at)
+       VALUES (?, ?, ?)`,
+    ).run(s, d, Date.now());
+  });
+  tx(state, discordId);
 }
 
 /** Return the pending login for a state, or null if none exists. */

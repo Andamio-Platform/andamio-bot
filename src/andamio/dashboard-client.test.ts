@@ -133,6 +133,34 @@ describe('getUserDashboard', () => {
     expect(result.state.enrolledCourses).toEqual(['c2']);
   });
 
+  it('flags a 200 with a MISSING student block as partial (degraded, not empty member)', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      jsonResponse({ data: { user: { alias: 'alice' } } }), // no student block
+    );
+    const result = await getUserDashboard(BASE, KEY, JWT);
+    expect(result.partial).toBe(true);
+  });
+
+  it('does NOT flag a 200 with a present-but-empty student block (legit empty member)', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      jsonResponse(
+        dashboard({ enrolled_courses: [], completed_courses: [], credentials_by_course: [] }),
+      ),
+    );
+    const result = await getUserDashboard(BASE, KEY, JWT);
+    expect(result.partial).toBe(false);
+  });
+
+  it('flags a 200 where a student array field is the wrong shape (contract drift)', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      jsonResponse(
+        dashboard({ credentials_by_course: { wrong: 'shape' } as unknown as [] }),
+      ),
+    );
+    const result = await getUserDashboard(BASE, KEY, JWT);
+    expect(result.partial).toBe(true);
+  });
+
   it('throws an http ApiError on a non-JSON body (even on a 2xx/206)', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue({
       ok: true,

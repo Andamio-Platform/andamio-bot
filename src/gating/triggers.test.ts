@@ -232,6 +232,29 @@ describe('reevaluateMember (dashboard model)', () => {
     expect(member!.roles.remove).not.toHaveBeenCalled();
   });
 
+  it('a failed/hung Discord member fetch → skipped, no reads, no role changes', async () => {
+    const member = makeMember(['r1']);
+    const guild = {
+      members: { fetch: vi.fn().mockRejectedValue(new Error('timed out')) },
+    };
+    const client = { guilds: { cache: { get: vi.fn(() => guild) } } };
+    initGating({
+      client,
+      config: {
+        guildId: 'g1',
+        andamioApiBaseUrl: 'https://api.test',
+        andamioApiKey: 'k',
+      },
+      mappings: CRED_MAPPINGS,
+    } as never);
+    getLinkByDiscordId.mockReturnValue(validLink());
+
+    await expect(reevaluateMember('d1')).resolves.toBe('skipped');
+    expect(getUserDashboard).not.toHaveBeenCalled();
+    expect(member.roles.add).not.toHaveBeenCalled();
+    expect(member.roles.remove).not.toHaveBeenCalled();
+  });
+
   it('not initialised → safe no-op (skipped)', async () => {
     resetGating();
     await expect(reevaluateMember('d1')).resolves.toBe('skipped');
@@ -281,10 +304,13 @@ describe('reevaluateAll (sweep)', () => {
     );
 
     const first = reevaluateAll();
-    const second = reevaluateAll(); // should no-op immediately
+    const second = reevaluateAll(); // re-entrant tick — must be dropped
     await second;
-    expect(getUserDashboard).not.toHaveBeenCalledTimes(2);
     release();
     await first;
+    // Across both calls only ONE sweep ran (one member → one read); the dropped
+    // re-entrant tick added nothing. Asserting the exact total after completion
+    // is timing-robust (the first sweep awaits a member fetch before its read).
+    expect(getUserDashboard).toHaveBeenCalledTimes(1);
   });
 });

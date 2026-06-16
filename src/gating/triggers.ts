@@ -50,9 +50,34 @@ export function resetGating(): void {
   deps = null;
 }
 
+/** Bound a Discord member fetch so a hung call can't pin the sweep guard. */
+const FETCH_MEMBER_TIMEOUT_MS = 10_000;
+
+/** Reject `p` if it has not settled within `ms`. */
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error(`timed out after ${ms}ms`)),
+      ms,
+    );
+    p.then(
+      (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
+}
+
 /**
  * Resolve a guild member by Discord id, or `null` if they aren't in the guild
- * (left, or never joined). Uses the cache then falls back to a fetch.
+ * (left, or never joined) — or if the fetch hangs past the timeout. The timeout
+ * matters for the periodic sweep: a Discord fetch that never settles would
+ * otherwise pin the re-entrancy guard and silently stop all gating.
  */
 async function fetchMember(
   deps: GatingDeps,
@@ -61,9 +86,12 @@ async function fetchMember(
   const guild = deps.client.guilds.cache.get(deps.config.guildId);
   if (!guild) return null;
   try {
-    return await guild.members.fetch(discordId);
+    return await withTimeout(
+      guild.members.fetch(discordId),
+      FETCH_MEMBER_TIMEOUT_MS,
+    );
   } catch {
-    // Unknown member (10007) or any fetch failure → treat as not present.
+    // Unknown member (10007), fetch failure, or timeout → treat as not present.
     return null;
   }
 }
