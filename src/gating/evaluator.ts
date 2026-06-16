@@ -13,7 +13,7 @@
  * moderator/booster/etc. role just because it isn't credential-derived.
  */
 
-import type { UserState } from '../andamio/scan-client';
+import type { UserState } from '../andamio/dashboard-client';
 import type { Mappings, MappingRule } from './mappings';
 
 /** The managed-role changes to apply to a member. */
