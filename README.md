@@ -83,7 +83,7 @@ Every variable, what it's for, and an example value:
 | `DISCORD_TOKEN` | yes | Discord bot token | `MTspeyJ...` (from Bot > Reset Token) |
 | `DISCORD_APP_ID` | yes | Discord application (client) id | `123456789012345678` |
 | `GUILD_ID` | yes | Discord guild (server) id the bot operates in | `987654321098765432` |
-| `SCAN_BASE_URL` | yes | andamioscan base URL — public read API (`/api/v2/users/{alias}/state`), no trailing slash | `https://preprod.api.andamio.io` *(preprod — confirm exact host)* |
+| `SCAN_BASE_URL` | yes | andamioscan base URL — public read API (`/api/v2/users/{alias}/state`), no trailing slash. The andamioscan explorer host, **not** `api.andamio.io` (the auth-gated db-api, which 401s on this path) | `https://preprod.andamioscan.io` *(mainnet: `https://andamioscan.io`)* |
 | `APP_LOGIN_BASE_URL` | yes | Andamio app base URL hosting the CLI login flow (`/auth/cli`), no trailing slash | `https://preprod-app.andamio.io` *(preprod — confirm exact host)* |
 | `BOT_CALLBACK_BASE_URL` | yes | Public https base URL where the bot receives the auth callback (`GET <this>/callback`); its origin must be in the app's allowlist (see Operating notes), no trailing slash | `https://your-bot-host.example.com` |
 | `ROLE_MAPPINGS_PATH` | yes | Path to the role-mappings JSON config | `./config/role-mappings.json` |
@@ -92,9 +92,11 @@ Every variable, what it's for, and an example value:
 | `GATING_SWEEP_INTERVAL_MS` | no | Interval (ms) for the periodic role-sweep over connected members. Positive number; default 15 min | `900000` |
 | `PORT` | no | Port the callback web server listens on. Default 3000 | `3000` |
 
-> The base URLs above use **preprod** placeholders. `SCAN_BASE_URL` and
-> `APP_LOGIN_BASE_URL` point at Andamio preprod — confirm the exact hosts for
-> your deployment (the known API host is `preprod.api.andamio.io`).
+> The base URLs above use **preprod** placeholders. `SCAN_BASE_URL` points at the
+> andamioscan explorer (`preprod.andamioscan.io` / mainnet `andamioscan.io`), which
+> is a **different host** from `APP_LOGIN_BASE_URL` (the Andamio app, `preprod-app`/
+> `app.andamio.io`). Do not use `api.andamio.io` for `SCAN_BASE_URL` — that is the
+> auth-gated db-api and returns 401 on the public state path.
 > `BOT_CALLBACK_BASE_URL` is **your** bot's public origin.
 
 ## 3. Configure credential gating (`role-mappings.json`)
