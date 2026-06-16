@@ -23,7 +23,8 @@ import type { Client, GuildMember } from 'discord.js';
 import type { Config } from '../config';
 import { getDb } from '../db/handle';
 import { getAllLinks, getLinkByDiscordId } from '../db/links';
-import { getUserState, ScanError } from '../andamio/scan-client';
+import { getUserDashboard, ApiError } from '../andamio/dashboard-client';
+import { isExpired } from '../andamio/jwt';
 import { evaluate, unconnectedDiff, type RoleDiff } from './evaluator';
 import type { Mappings } from './mappings';
 
@@ -88,9 +89,14 @@ async function applyDiff(member: GuildMember, diff: RoleDiff): Promise<void> {
  *   - Member not in the guild → no-op (nothing to apply roles to).
  *   - Member UNCONNECTED (no link) → remove any managed roles they hold, add
  *     none. Connecting is required to earn credential roles.
- *   - Member connected → fetch state, diff, apply. A scan `not-found` is treated
- *     like "no credentials yet" (remove managed roles); other scan errors abort
- *     this member without changing roles (transient — try again next sweep).
+ *   - Member connected but with NO usable JWT (never captured, or expired) →
+ *     leave roles unchanged. End-user JWTs cannot be refreshed unattended, so
+ *     this member simply re-gates the next time they `/login` or `/refresh`
+ *     (where the Connect button is offered). No role churn on a stale token.
+ *   - Member connected with a valid JWT → read the dashboard, diff, apply. A
+ *     `not-found` is treated like "no credentials yet" (remove managed roles);
+ *     a 401 (operator key / revoked token) or any transient error aborts this
+ *     member without changing roles.
  */
 export async function reevaluateMember(discordId: string): Promise<void> {
   if (!deps) return; // Not initialised (e.g. in unit tests) — safe no-op.
@@ -109,20 +115,40 @@ export async function reevaluateMember(discordId: string): Promise<void> {
       return;
     }
 
+    // Connected but no usable JWT → cannot read state unattended; leave roles
+    // as-is (re-gates on next interactive /login or /refresh).
+    if (!link.user_jwt || isExpired(link.jwt_expires_at)) {
+      return;
+    }
+
     let state;
     try {
-      state = await getUserState(d.config.scanBaseUrl, link.alias);
+      state = await getUserDashboard(
+        d.config.andamioApiBaseUrl,
+        d.config.andamioApiKey,
+        link.user_jwt,
+      );
     } catch (err) {
-      if (err instanceof ScanError && err.kind === 'not-found') {
+      if (err instanceof ApiError && err.kind === 'not-found') {
         // Connected but no on-chain state yet → no credential roles.
         await applyDiff(member, unconnectedDiff(currentRoles, d.mappings));
         return;
       }
-      // Transient (network / http) — don't churn roles on a flaky read.
-      console.error(
-        `Gating: scan read failed for alias "${link.alias}" (${discordId}):`,
-        err,
-      );
+      // 401 points at the operator key (or a revoked token), not the member —
+      // log it distinctly. Any other error is transient. Either way, don't
+      // churn roles on a failed read.
+      if (err instanceof ApiError && err.kind === 'unauthorized') {
+        console.error(
+          `Gating: Andamio API 401 for "${link.alias}" (${discordId}) — ` +
+            `check ANDAMIO_API_KEY:`,
+          err.message,
+        );
+      } else {
+        console.error(
+          `Gating: dashboard read failed for "${link.alias}" (${discordId}):`,
+          err,
+        );
+      }
       return;
     }
 

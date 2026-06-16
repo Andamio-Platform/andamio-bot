@@ -325,11 +325,12 @@ describe('renderCredentialsEmbed — earn-it hints', () => {
   });
 
   it('falls back to the course display name when a rule has no label', () => {
-    const { label: _omit, ...noLabel } = devRule;
+    const noLabel: MappingRule = { ...devRule };
+    delete noLabel.label;
     const embed = renderCredentialsEmbed(
       state(),
       { c1: 'Cardano 101' },
-      mappingsOf([noLabel as MappingRule]),
+      mappingsOf([noLabel]),
     ).toJSON();
     expect(earnMore(embed as never)?.value).toContain('Cardano 101');
   });
