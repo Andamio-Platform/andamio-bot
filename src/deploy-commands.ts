@@ -3,12 +3,13 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 import { loadConfig } from './config';
+import { isCommandModule } from './command-loader';
 
 const config = loadConfig();
 
 const commands: RESTPostAPIApplicationCommandsJSONBody[] = [];
 const commandsPath = path.join(__dirname, 'commands');
-const commandFiles = fs.readdirSync(commandsPath).filter((file: string) => file.endsWith('.js') || file.endsWith('.ts'));
+const commandFiles = fs.readdirSync(commandsPath).filter(isCommandModule);
 
 // Grab the SlashCommandBuilder#toJSON() output of each command's data for deployment
 for (const file of commandFiles) {

@@ -17,6 +17,7 @@ import { setDb } from './db/handle';
 import { loadMappings } from './gating/mappings';
 import { initGating, reevaluateAll, reevaluateMember } from './gating/triggers';
 import { startCallbackServer } from './web/server';
+import { isCommandModule } from './command-loader';
 
 interface Command {
   data: {
@@ -56,7 +57,7 @@ function loadCommands(client: BotClient): void {
   const commandsPath = path.join(__dirname, 'commands');
   const commandFiles = fs
     .readdirSync(commandsPath)
-    .filter((file) => file.endsWith('.js') || file.endsWith('.ts'));
+    .filter((file) => isCommandModule(file));
 
   for (const file of commandFiles) {
     const filePath = path.join(commandsPath, file);
