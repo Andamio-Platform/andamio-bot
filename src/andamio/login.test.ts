@@ -105,10 +105,28 @@ describe('storeLink', () => {
     db.close();
   });
 
-  it('persists discord_id ↔ alias with no refresh token (alias is the key)', () => {
+  it('persists discord_id ↔ alias; no JWT given → user_jwt null', () => {
     storeLink(db, 'discord-1', 'alice');
     const link = getLinkByDiscordId(db, 'discord-1');
     expect(link?.alias).toBe('alice');
+    expect(link?.user_jwt).toBeNull();
+    expect(link?.jwt_expires_at).toBeNull();
     expect(link?.refresh_token).toBeNull();
+  });
+
+  it('persists the user JWT and its decoded expiry when provided', () => {
+    const expSeconds = 1_900_000_000;
+    const header = Buffer.from(JSON.stringify({ alg: 'HS256' })).toString(
+      'base64url',
+    );
+    const body = Buffer.from(JSON.stringify({ exp: expSeconds })).toString(
+      'base64url',
+    );
+    const jwt = `${header}.${body}.sig`;
+
+    storeLink(db, 'discord-2', 'bob', jwt);
+    const link = getLinkByDiscordId(db, 'discord-2');
+    expect(link?.user_jwt).toBe(jwt);
+    expect(link?.jwt_expires_at).toBe(expSeconds * 1000);
   });
 });

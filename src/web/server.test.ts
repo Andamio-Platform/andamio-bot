@@ -22,12 +22,21 @@ describe('handleCallback', () => {
     db.close();
   });
 
-  it('AE1: valid callback with matching state stores discord_id ↔ alias and shows success', () => {
+  it('AE1: valid callback with matching state stores discord_id ↔ alias + JWT and shows success', () => {
     const { state } = startLogin(db, 'discord-1', 'https://a', 'https://b');
+
+    const expSeconds = 1_900_000_000;
+    const header = Buffer.from(JSON.stringify({ alg: 'HS256' })).toString(
+      'base64url',
+    );
+    const body = Buffer.from(JSON.stringify({ exp: expSeconds })).toString(
+      'base64url',
+    );
+    const jwt = `${header}.${body}.sig`;
 
     const res = handleCallback(
       db,
-      callbackQuery({ state, alias: 'alice', jwt: 'proof.jwt', user_id: 'u1' }),
+      callbackQuery({ state, alias: 'alice', jwt, user_id: 'u1' }),
     );
 
     expect(res.status).toBe(200);
@@ -37,8 +46,26 @@ describe('handleCallback', () => {
 
     const link = getLinkByDiscordId(db, 'discord-1');
     expect(link?.alias).toBe('alice');
-    // JWT is proof only — never persisted.
-    expect(link?.refresh_token).toBeNull();
+    // The user JWT is now persisted (it is the dashboard Bearer), with its
+    // decoded expiry in epoch-ms.
+    expect(link?.user_jwt).toBe(jwt);
+    expect(link?.jwt_expires_at).toBe(expSeconds * 1000);
+  });
+
+  it('callback with a malformed jwt still links (alias stored, JWT null)', () => {
+    const { state } = startLogin(db, 'discord-2', 'https://a', 'https://b');
+
+    const res = handleCallback(
+      db,
+      callbackQuery({ state, alias: 'bob', jwt: 'not-a-jwt', user_id: 'u2' }),
+    );
+
+    expect(res.status).toBe(200);
+    const link = getLinkByDiscordId(db, 'discord-2');
+    expect(link?.alias).toBe('bob');
+    expect(link?.user_jwt).toBe('not-a-jwt');
+    // Malformed token → no decodable expiry, so reads will prompt a reconnect.
+    expect(link?.jwt_expires_at).toBeNull();
   });
 
   it('rejects an unknown state, writes no link', () => {
