@@ -1,7 +1,7 @@
 ---
 title: "refactor: read credentials via authenticated api.andamio.io dashboard"
 type: refactor
-status: active
+status: completed
 date: 2026-06-16
 ---
 
