@@ -64,7 +64,7 @@ export function desiredRoles(state: UserState, mappings: Mappings): Set<string> 
 /**
  * Diff a member's desired managed roles against the roles they currently hold.
  *
- * @param state         the member's Andamio state (from andamioscan).
+ * @param state         the member's Andamio state (from the dashboard API).
  * @param currentRoles  every role id the member currently has (managed + not).
  * @param mappings      the loaded role mappings (defines the managed set).
  */

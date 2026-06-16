@@ -1,7 +1,7 @@
 /**
  * Optional course display-name lookup.
  *
- * andamioscan returns course IDs, not human titles. This module provides an
+ * The dashboard read returns course IDs, not human titles. This module provides an
  * OPTIONAL `course_id → display name` map so `/credentials` can show friendly
  * names, DEFAULTING to the raw `course_id` when no mapping exists.
  *

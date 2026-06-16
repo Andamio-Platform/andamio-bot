@@ -5,11 +5,12 @@ a Discord community. A member proves they control an Andamio access-token alias
 with `/login`, sees their earned credentials inline with `/credentials`, and is
 automatically granted Discord roles based on those credentials.
 
-It does what a plain wallet-verification bot cannot: it reads Andamio
-credentials (publicly, by alias, from andamioscan) and gates Discord roles on
-them — **with no wallet handling by adopters.** The bot never touches a wallet,
-seed phrase, or private key. Login is delegated to the hosted Andamio app; the
-bot only ever stores a Discord-id ↔ alias link and reads credentials by alias.
+It does what a plain wallet-verification bot cannot: it reads each member's
+Andamio credentials from the authenticated Andamio API and gates Discord roles
+on them — **with no wallet handling by adopters.** The bot never touches a
+wallet, seed phrase, or private key. Login is delegated to the hosted Andamio
+app; the bot stores a Discord-id ↔ alias link plus the member's login JWT, and
+reads that member's dashboard with it.
 
 This repo is a **template**: clone it, set your config, and run it against your
 own Discord guild and an Andamio (preprod) deployment with **no code changes**.
@@ -27,13 +28,20 @@ own Discord guild and an Andamio (preprod) deployment with **no code changes**.
 
 - `/login` reuses the Andamio app's hosted CLI auth flow (`/auth/cli`) to prove
   a Discord member controls an access-token alias, then stores
-  `discord_id ↔ alias`. No wallet logic lives in this repo.
-- Reads run on andamioscan's public `GET /api/v2/users/{alias}/state` — no JWT,
-  no API key.
+  `discord_id ↔ alias` plus the member's user JWT. No wallet logic lives in this
+  repo.
+- Reads run on the authenticated Andamio API, `POST /api/v2/user/dashboard`,
+  with two headers: `X-API-Key` (the operator key — see `ANDAMIO_API_KEY`)
+  authenticates the bot, and `Authorization: Bearer <member JWT>` selects whose
+  dashboard to read. The dashboard is scoped to the JWT's user.
 - Configurable rules (`role-mappings.json`) map earned credentials to Discord
   roles. The bot grants and revokes **only** the roles it manages.
 - Roles re-evaluate on `/login`, `/refresh`, when a member (re)joins the guild,
-  and on a periodic background sweep.
+  and on a periodic background sweep. End-user JWTs expire and cannot be
+  refreshed unattended: a member whose JWT has lapsed keeps their current roles
+  until they reconnect (the bot shows a one-click **Connect** button on
+  `/credentials` and `/refresh`). The background sweep skips lapsed members
+  rather than churning their roles.
 
 The datastore is SQLite (`better-sqlite3`) — file-based, zero-ops.
 
@@ -41,7 +49,8 @@ The datastore is SQLite (`better-sqlite3`) — file-based, zero-ops.
 
 - **Node.js 18+** (better-sqlite3 ships prebuilt binaries for current LTS).
 - **A Discord application + bot** (created below).
-- **An Andamio app + andamioscan deployment** to point at (preprod by default).
+- **An Andamio app + API deployment** to point at (preprod by default), and an
+  **operator Andamio API key** (`ANDAMIO_API_KEY`) for the API host.
 - **A public https URL** for the bot to receive the login callback (so the
   hosted app can redirect the auth result back). Required for `/login` to
   complete; any tunnel or host that gives you a stable https origin works.
@@ -83,7 +92,8 @@ Every variable, what it's for, and an example value:
 | `DISCORD_TOKEN` | yes | Discord bot token | `MTspeyJ...` (from Bot > Reset Token) |
 | `DISCORD_APP_ID` | yes | Discord application (client) id | `123456789012345678` |
 | `GUILD_ID` | yes | Discord guild (server) id the bot operates in | `987654321098765432` |
-| `SCAN_BASE_URL` | yes | andamioscan base URL — public read API (`/api/v2/users/{alias}/state`), no trailing slash. The andamioscan explorer host, **not** `api.andamio.io` (the auth-gated db-api, which 401s on this path) | `https://preprod.andamioscan.io` *(mainnet: `https://andamioscan.io`)* |
+| `ANDAMIO_API_BASE_URL` | yes | Andamio API base URL — the authenticated read API (`POST /api/v2/user/dashboard`), no trailing slash | `https://preprod.api.andamio.io` *(mainnet: `https://api.andamio.io`)* |
+| `ANDAMIO_API_KEY` | yes | **SECRET.** Operator-level Andamio API key, sent as `X-API-Key`. Authenticates the bot operator (one key per deployment); mainnet keys are prefixed `ant_mn_`. Never commit it — set it in `.env` (gitignored) and as a secret service variable on your host | `ant_mn_…` |
 | `APP_LOGIN_BASE_URL` | yes | Andamio app base URL hosting the CLI login flow (`/auth/cli`), no trailing slash | `https://preprod-app.andamio.io` *(preprod — confirm exact host)* |
 | `BOT_CALLBACK_BASE_URL` | yes | Public https base URL where the bot receives the auth callback (`GET <this>/callback`); its origin must be in the app's allowlist (see Operating notes), no trailing slash | `https://your-bot-host.example.com` |
 | `ROLE_MAPPINGS_PATH` | yes | Path to the role-mappings JSON config | `./config/role-mappings.json` |
@@ -92,12 +102,12 @@ Every variable, what it's for, and an example value:
 | `GATING_SWEEP_INTERVAL_MS` | no | Interval (ms) for the periodic role-sweep over connected members. Positive number; default 15 min | `900000` |
 | `PORT` | no | Port the callback web server listens on. Default 3000 | `3000` |
 
-> The base URLs above use **preprod** placeholders. `SCAN_BASE_URL` points at the
-> andamioscan explorer (`preprod.andamioscan.io` / mainnet `andamioscan.io`), which
-> is a **different host** from `APP_LOGIN_BASE_URL` (the Andamio app, `preprod-app`/
-> `app.andamio.io`). Do not use `api.andamio.io` for `SCAN_BASE_URL` — that is the
-> auth-gated db-api and returns 401 on the public state path.
-> `BOT_CALLBACK_BASE_URL` is **your** bot's public origin.
+> The base URLs above use **preprod** placeholders. `ANDAMIO_API_BASE_URL` is the
+> API host (`preprod.api.andamio.io` / mainnet `api.andamio.io`), a **different
+> host** from `APP_LOGIN_BASE_URL` (the Andamio app, `preprod-app`/`app.andamio.io`).
+> `ANDAMIO_API_KEY` is a **secret** — keep it out of git and out of
+> `role-mappings.json`; set it locally in `.env` and as a secret service variable
+> on your host. `BOT_CALLBACK_BASE_URL` is **your** bot's public origin.
 
 ## 3. Configure credential gating (`role-mappings.json`)
 
@@ -123,7 +133,7 @@ moderator/booster/etc. role).
 | Field | Required | What it is | Where to get it |
 |---|---|---|---|
 | `type` | yes | `enrolled`, `course-complete`, or `credential` (see below) | — |
-| `course_id` | yes | The Andamio course the rule keys on | From your Andamio course / the andamioscan API |
+| `course_id` | yes | The Andamio course the rule keys on | From your Andamio course / the Andamio API |
 | `slt_hash` | only for `credential` | The specific credential within the course | From the course's credential definition |
 | `role_id` | yes | The Discord role to grant | Discord → enable Developer Mode → right-click the role → Copy Role ID |
 | `label` | no | Human name for the gate (e.g. `"Andamio Developer"`), used in the `/credentials` earn-it hint | You choose it |
@@ -214,8 +224,17 @@ For local development: `npm run dev` runs from source (ts-node) and
   managed roles they hold on the next evaluation.
 - **Re-evaluation timing.** Roles update on `/login`, on `/refresh` (on demand),
   when a member rejoins, and on the periodic sweep (`GATING_SWEEP_INTERVAL_MS`,
-  default 15 min). A member who crosses a threshold sees the role on their next
-  `/refresh` or the next sweep — no re-login needed.
+  default 15 min) — for members whose login JWT is still valid.
+- **Member JWTs expire; reconnection is one click.** Reads use the member's
+  Andamio login JWT, which has a finite lifetime and cannot be refreshed without
+  the member. When it lapses, `/credentials` and `/refresh` reply with a
+  **Connect** button (a fresh `/login` link); the background sweep skips the
+  member rather than churning their roles, so they keep their current roles until
+  they reconnect.
+- **The SQLite store holds secrets.** Beyond the `discord_id ↔ alias` link, the
+  database persists each member's user JWT. Keep `DB_PATH` on a private,
+  persistent volume (and never commit `data/`) — losing it just forces everyone
+  to `/login` again; exposing it leaks bearer tokens.
 
 ## Scripts
 
