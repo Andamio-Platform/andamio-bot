@@ -178,15 +178,16 @@ describe('/credentials execute', () => {
 
   it('AE5: connected alias with completed courses renders a grouped ephemeral embed', async () => {
     getLinkByDiscordId.mockReturnValue(linkedJwt('alice'));
-    getUserDashboard.mockResolvedValue(
-      state({
+    getUserDashboard.mockResolvedValue({
+      partial: false,
+      state: state({
         completedCourses: [
           { courseId: 'c1', claimedCredentials: ['s1', 's2'] },
           { courseId: 'c2', claimedCredentials: ['s3'] },
         ],
         enrolledCourses: ['c3'],
       }),
-    );
+    });
     const interaction = makeInteraction();
 
     await execute(interaction as never);
@@ -213,9 +214,10 @@ describe('/credentials execute', () => {
 
   it('only-enrolled (no completed) → enrolled section, zero credentials', async () => {
     getLinkByDiscordId.mockReturnValue(linkedJwt('bob'));
-    getUserDashboard.mockResolvedValue(
-      state({ alias: 'bob', enrolledCourses: ['c9'] }),
-    );
+    getUserDashboard.mockResolvedValue({
+      partial: false,
+      state: state({ alias: 'bob', enrolledCourses: ['c9'] }),
+    });
     const interaction = makeInteraction();
 
     await execute(interaction as never);
@@ -268,6 +270,21 @@ describe('/credentials execute', () => {
     expect(payload.content).toMatch(/trouble verifying|try .*again/i);
     // The member is NOT bounced to reconnect for an operator-side fault.
     expect(buildReloginPrompt).not.toHaveBeenCalled();
+  });
+
+  it('loadMappings throwing degrades to no earn-hints, embed still renders', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    getLinkByDiscordId.mockReturnValue(linkedJwt('alice'));
+    getUserDashboard.mockResolvedValue({ partial: false, state: state() });
+    loadMappings.mockImplementation(() => {
+      throw new Error('bad role-mappings.json');
+    });
+    const interaction = makeInteraction();
+
+    await execute(interaction as never);
+
+    const payload = interaction.reply.mock.calls[0][0];
+    expect(payload.embeds).toHaveLength(1);
   });
 });
 
@@ -356,7 +373,7 @@ describe('renderCredentialsEmbed — earn-it hints', () => {
 
   it('end-to-end: a connected non-holder gets the Earn more field via execute()', async () => {
     getLinkByDiscordId.mockReturnValue(linkedJwt('alice'));
-    getUserDashboard.mockResolvedValue(state());
+    getUserDashboard.mockResolvedValue({ partial: false, state: state() });
     loadMappings.mockReturnValue(mappingsOf([devRule]));
     const interaction = makeInteraction();
 

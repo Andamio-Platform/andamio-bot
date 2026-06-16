@@ -4,8 +4,12 @@ import type { Db } from '../db/index';
 import { consumePending, storeLink } from '../andamio/login';
 import { reevaluateMember } from '../gating/triggers';
 
-/** Re-evaluation hook fired after a successful link (U5 makes it real). */
-export type ReevaluateHook = (discordId: string) => void | Promise<void>;
+/**
+ * Re-evaluation hook fired after a successful link. Called fire-and-forget, so
+ * any return value is ignored (reevaluateMember returns an outcome the callback
+ * does not use).
+ */
+export type ReevaluateHook = (discordId: string) => unknown;
 
 export interface CallbackServerOptions {
   db: Db;

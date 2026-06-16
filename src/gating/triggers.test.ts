@@ -108,9 +108,10 @@ describe('reevaluateMember (dashboard model)', () => {
   it('valid JWT holding the credential → role added', async () => {
     const member = wire(makeMember([]));
     getLinkByDiscordId.mockReturnValue(validLink());
-    getUserDashboard.mockResolvedValue(
-      state({ completedCourses: [{ courseId: 'c1', claimedCredentials: ['s1'] }] }),
-    );
+    getUserDashboard.mockResolvedValue({
+      partial: false,
+      state: state({ completedCourses: [{ courseId: 'c1', claimedCredentials: ['s1'] }] }),
+    });
 
     await reevaluateMember('d1');
 
@@ -126,11 +127,39 @@ describe('reevaluateMember (dashboard model)', () => {
   it('valid JWT no longer holding the credential → managed role removed', async () => {
     const member = wire(makeMember(['r1']));
     getLinkByDiscordId.mockReturnValue(validLink());
-    getUserDashboard.mockResolvedValue(state()); // empty
+    getUserDashboard.mockResolvedValue({ partial: false, state: state() }); // empty
 
     await reevaluateMember('d1');
 
     expect(member!.roles.remove).toHaveBeenCalledWith('r1', expect.any(String));
+  });
+
+  it('partial (206) read → roles unchanged, no churn on incomplete data', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const member = wire(makeMember(['r1']));
+    getLinkByDiscordId.mockReturnValue(validLink());
+    // Degraded upstream: empty state but flagged partial — must NOT strip roles.
+    getUserDashboard.mockResolvedValue({ partial: true, state: state() });
+
+    await reevaluateMember('d1');
+
+    expect(member!.roles.add).not.toHaveBeenCalled();
+    expect(member!.roles.remove).not.toHaveBeenCalled();
+  });
+
+  it('a failing role op is isolated inside applyDiff — no throw escapes', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const member = wire(makeMember([]));
+    member!.roles.add = vi.fn().mockRejectedValue(new Error('Missing Permissions'));
+    getLinkByDiscordId.mockReturnValue(validLink());
+    getUserDashboard.mockResolvedValue({
+      partial: false,
+      state: state({ completedCourses: [{ courseId: 'c1', claimedCredentials: ['s1'] }] }),
+    });
+
+    // applyDiff swallows the per-role failure, so the evaluation still completes.
+    await expect(reevaluateMember('d1')).resolves.toBe('updated');
+    expect(member!.roles.add).toHaveBeenCalledWith('r1', expect.any(String));
   });
 
   it('expired JWT → no API call, roles unchanged (no churn)', async () => {
@@ -178,14 +207,17 @@ describe('reevaluateMember (dashboard model)', () => {
     expect(member!.roles.remove).toHaveBeenCalledWith('r1', expect.any(String));
   });
 
-  it('not-found from the API → strips managed roles (no on-chain state)', async () => {
+  it('not-found from the API → roles unchanged (404 is not authoritative-empty)', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
     const member = wire(makeMember(['r1']));
     getLinkByDiscordId.mockReturnValue(validLink());
     getUserDashboard.mockRejectedValue(new ApiError('not-found', 'none', 404));
 
     await reevaluateMember('d1');
 
-    expect(member!.roles.remove).toHaveBeenCalledWith('r1', expect.any(String));
+    // A genuine "no credentials" arrives as a successful 200 with empty state;
+    // a 404 is treated as transient and must not strip earned roles.
+    expect(member!.roles.remove).not.toHaveBeenCalled();
   });
 
   it('network error → roles unchanged (no churn)', async () => {
@@ -200,9 +232,9 @@ describe('reevaluateMember (dashboard model)', () => {
     expect(member!.roles.remove).not.toHaveBeenCalled();
   });
 
-  it('not initialised → safe no-op', async () => {
+  it('not initialised → safe no-op (skipped)', async () => {
     resetGating();
-    await expect(reevaluateMember('d1')).resolves.toBeUndefined();
+    await expect(reevaluateMember('d1')).resolves.toBe('skipped');
   });
 });
 
@@ -226,12 +258,33 @@ describe('reevaluateAll (sweep)', () => {
     const member = wire(makeMember([]));
     getAllLinks.mockReturnValue([{ discord_id: 'd1' }]);
     getLinkByDiscordId.mockReturnValue(validLink());
-    getUserDashboard.mockResolvedValue(
-      state({ completedCourses: [{ courseId: 'c1', claimedCredentials: ['s1'] }] }),
-    );
+    getUserDashboard.mockResolvedValue({
+      partial: false,
+      state: state({ completedCourses: [{ courseId: 'c1', claimedCredentials: ['s1'] }] }),
+    });
 
     await reevaluateAll();
 
     expect(member!.roles.add).toHaveBeenCalledWith('r1', expect.any(String));
+  });
+
+  it('drops a re-entrant tick while a sweep is already running', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    wire(makeMember([]));
+    // A slow per-member step lets us start a second sweep mid-flight.
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    getAllLinks.mockReturnValue([{ discord_id: 'd1' }]);
+    getLinkByDiscordId.mockReturnValue(validLink());
+    getUserDashboard.mockReturnValue(
+      gate.then(() => ({ partial: false, state: state() })),
+    );
+
+    const first = reevaluateAll();
+    const second = reevaluateAll(); // should no-op immediately
+    await second;
+    expect(getUserDashboard).not.toHaveBeenCalledTimes(2);
+    release();
+    await first;
   });
 });

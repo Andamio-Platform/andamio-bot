@@ -17,7 +17,7 @@ vi.mock('../db/links', () => ({
   getLinkByDiscordId: (...a: unknown[]) => getLinkByDiscordId(...a),
 }));
 
-const reevaluateMember = vi.fn().mockResolvedValue(undefined);
+const reevaluateMember = vi.fn().mockResolvedValue('updated');
 vi.mock('../gating/triggers', () => ({
   reevaluateMember: (...a: unknown[]) => reevaluateMember(...a),
 }));
@@ -56,7 +56,7 @@ const PAST = Date.now() - 60 * 60 * 1000;
 
 beforeEach(() => {
   getLinkByDiscordId.mockReset();
-  reevaluateMember.mockClear().mockResolvedValue(undefined);
+  reevaluateMember.mockClear().mockResolvedValue('updated');
   buildReloginPrompt.mockClear();
 });
 
@@ -109,10 +109,9 @@ describe('/refresh execute', () => {
     expect(interaction.editReply.mock.calls[0][0].content).toBe('relogin:expired');
   });
 
-  it('reevaluation failure → graceful error message', async () => {
-    vi.spyOn(console, 'error').mockImplementation(() => {});
+  it('reevaluation reports failed (swallowed read error) → honest error message', async () => {
     getLinkByDiscordId.mockReturnValue({ user_jwt: 'h.p.s', jwt_expires_at: FUTURE });
-    reevaluateMember.mockRejectedValue(new Error('boom'));
+    reevaluateMember.mockResolvedValue('failed');
     const interaction = makeInteraction();
 
     await execute(interaction as never);

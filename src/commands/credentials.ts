@@ -128,11 +128,13 @@ export async function execute(
 
   let state: UserState;
   try {
-    state = await getUserDashboard(
+    // Partial (206) reads are fine to display as-is; only role gating must be
+    // cautious about incomplete data (see triggers.ts).
+    ({ state } = await getUserDashboard(
       config.andamioApiBaseUrl,
       config.andamioApiKey,
       link.user_jwt,
-    );
+    ));
   } catch (err) {
     if (err instanceof ApiError && err.kind === 'unauthorized') {
       // The JWT passed our local expiry check but the API still rejected it.

@@ -48,12 +48,20 @@ describe('startLogin', () => {
     );
   });
 
-  it('mints a distinct state on each call (re-login overwrites later)', () => {
+  it('mints a distinct state each call; a new login for the same id invalidates the prior pending', () => {
     const first = startLogin(db, 'd', 'https://a', 'https://b');
     const second = startLogin(db, 'd', 'https://a', 'https://b');
     expect(first.state).not.toBe(second.state);
-    expect(getPendingByState(db, first.state)).not.toBeNull();
+    // Dedup: only one live login per member — the new one supersedes the old.
+    expect(getPendingByState(db, first.state)).toBeNull();
     expect(getPendingByState(db, second.state)).not.toBeNull();
+  });
+
+  it('keeps separate pending rows for different members', () => {
+    const a = startLogin(db, 'member-a', 'https://a', 'https://b');
+    const b = startLogin(db, 'member-b', 'https://a', 'https://b');
+    expect(getPendingByState(db, a.state)).not.toBeNull();
+    expect(getPendingByState(db, b.state)).not.toBeNull();
   });
 });
 

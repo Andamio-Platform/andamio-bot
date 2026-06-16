@@ -25,6 +25,17 @@ export interface UserState {
   completedCourses: CompletedCourse[];
 }
 
+/**
+ * A dashboard read result. `partial` is true when the API returned HTTP 206 —
+ * one upstream source was degraded, so `state` may be incomplete. Destructive
+ * consumers (role gating) must NOT remove roles on a partial read; display
+ * consumers (`/credentials`) may show it as-is.
+ */
+export interface DashboardResult {
+  state: UserState;
+  partial: boolean;
+}
+
 /** Why a dashboard read failed, so the caller can branch (401 → reconnect, etc.). */
 export type ApiErrorKind = 'unauthorized' | 'not-found' | 'http' | 'network';
 
@@ -96,6 +107,9 @@ export function mapDashboard(raw: unknown): UserState {
   for (const entry of byCourse) {
     const id = courseIdOf(entry);
     if (id === null) continue;
+    // `credentials` is an array of bare slt_hash strings; toStringArray drops
+    // anything non-string. If the API ever nests them as objects, this would
+    // silently empty — pin the element type here if that contract changes.
     const credentials = toStringArray(
       (entry as { credentials?: unknown }).credentials,
     );
@@ -127,19 +141,24 @@ export function mapDashboard(raw: unknown): UserState {
   };
 }
 
+/** Abort a dashboard request that has not responded within this many ms. */
+const REQUEST_TIMEOUT_MS = 10_000;
+
 /**
  * Fetch a member's dashboard and map it to {@link UserState}.
  *
  * Sends the operator `X-API-Key` and the member's `Authorization: Bearer`.
  * Throws an {@link ApiError} on 401 (`unauthorized`), 404 (`not-found`), any
- * other non-2xx (`http`), or a network failure (`network`). 200 and 206
- * (partial content — one upstream source degraded) are both treated as success.
+ * other non-2xx (`http`), or a network/timeout failure (`network`). 200 and 206
+ * are both successes; 206 (partial content — one upstream source degraded) is
+ * flagged via {@link DashboardResult.partial} so gating can decline to churn.
+ * The request is bounded by a timeout so a hung API can't stall the sweep.
  */
 export async function getUserDashboard(
   apiBaseUrl: string,
   apiKey: string,
   userJwt: string,
-): Promise<UserState> {
+): Promise<DashboardResult> {
   const url = `${apiBaseUrl}/api/v2/user/dashboard`;
 
   let response: Response;
@@ -153,6 +172,7 @@ export async function getUserDashboard(
         Accept: 'application/json',
       },
       body: '{}',
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
   } catch (err) {
     throw new ApiError(
@@ -175,6 +195,8 @@ export async function getUserDashboard(
     );
   }
 
+  const partial = response.status === 206;
+
   let body: unknown;
   try {
     body = await response.json();
@@ -186,5 +208,5 @@ export async function getUserDashboard(
     );
   }
 
-  return mapDashboard(body);
+  return { state: mapDashboard(body), partial };
 }

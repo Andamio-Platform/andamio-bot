@@ -106,7 +106,7 @@ describe('getUserDashboard', () => {
       ),
     );
 
-    const state = await getUserDashboard(BASE, KEY, JWT);
+    const result = await getUserDashboard(BASE, KEY, JWT);
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0];
@@ -117,18 +117,34 @@ describe('getUserDashboard', () => {
     expect(headers['X-API-Key']).toBe(KEY);
     expect(headers['Authorization']).toBe(`Bearer ${JWT}`);
 
-    expect(state.enrolledCourses).toEqual(['c2']);
-    expect(state.completedCourses).toEqual([
+    expect(result.partial).toBe(false);
+    expect(result.state.enrolledCourses).toEqual(['c2']);
+    expect(result.state.completedCourses).toEqual([
       { courseId: 'c1', claimedCredentials: ['s1'] },
     ]);
   });
 
-  it('treats 206 partial content as success', async () => {
+  it('treats 206 as success but flags it partial (so gating can decline to churn)', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       jsonResponse(dashboard({ enrolled_courses: [{ course_id: 'c2' }] }), 206),
     );
-    const state = await getUserDashboard(BASE, KEY, JWT);
-    expect(state.enrolledCourses).toEqual(['c2']);
+    const result = await getUserDashboard(BASE, KEY, JWT);
+    expect(result.partial).toBe(true);
+    expect(result.state.enrolledCourses).toEqual(['c2']);
+  });
+
+  it('throws an http ApiError on a non-JSON body (even on a 2xx/206)', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      status: 206,
+      json: async () => {
+        throw new Error('Unexpected end of JSON input');
+      },
+    } as unknown as Response);
+    const err = await getUserDashboard(BASE, KEY, JWT).catch((e) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err.kind).toBe('http');
+    expect(err.status).toBe(206);
   });
 
   it('throws an unauthorized ApiError on 401', async () => {

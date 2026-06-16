@@ -4,6 +4,7 @@ import type { Db } from './index';
 export interface Link {
   discord_id: string;
   alias: string;
+  /** Reserved/unused: end-user JWTs have no unattended refresh, so this is always null. */
   refresh_token: string | null;
   /** The member's Andamio user JWT, sent as the dashboard `Authorization: Bearer`. */
   user_jwt: string | null;
@@ -86,8 +87,15 @@ export function deleteLink(db: Db, discordId: string): void {
 /**
  * Record a pending login keyed by `state`, with the invoking Discord id.
  * `created_at` is set to the current epoch-ms.
+ *
+ * Any prior pending row for the same Discord id is deleted first: a member only
+ * ever needs one live login URL, and starting a new login invalidates the old
+ * one. This bounds the table to one row per in-flight member, so repeatedly
+ * triggering the Connect button (e.g. an expired-JWT member running `/refresh`)
+ * cannot accumulate orphaned rows.
  */
 export function createPending(db: Db, state: string, discordId: string): void {
+  db.prepare(`DELETE FROM pending_logins WHERE discord_id = ?`).run(discordId);
   db.prepare(
     `INSERT INTO pending_logins (state, discord_id, created_at)
      VALUES (?, ?, ?)`,

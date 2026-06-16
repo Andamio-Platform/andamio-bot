@@ -51,18 +51,19 @@ export async function execute(
     return;
   }
 
-  try {
-    await reevaluateMember(interaction.user.id);
-    await interaction.editReply({
-      content:
-        'Refreshed. Your roles now reflect your current Andamio credentials.',
-    });
-  } catch (err) {
-    console.error('Gating: /refresh failed:', err);
+  // reevaluateMember never throws; it returns the outcome so we report honestly
+  // (a swallowed read failure must not show a false "Refreshed").
+  const outcome = await reevaluateMember(interaction.user.id);
+  if (outcome === 'failed') {
     await interaction.editReply({
       content:
         'Could not refresh your roles right now. Please try `/refresh` again ' +
         'in a moment.',
     });
+    return;
   }
+  await interaction.editReply({
+    content:
+      'Refreshed. Your roles now reflect your current Andamio credentials.',
+  });
 }

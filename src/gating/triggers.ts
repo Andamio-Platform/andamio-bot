@@ -68,15 +68,37 @@ async function fetchMember(
   }
 }
 
-/** Apply a managed-role diff to a guild member. */
+/**
+ * Apply a managed-role diff to a guild member. Each role op is isolated: a
+ * single failing add/remove (e.g. a managed role positioned above the bot's
+ * own role, or a transient Discord error) is logged and skipped so it cannot
+ * abort the rest of the diff or leave gating wedged on one bad role.
+ */
 async function applyDiff(member: GuildMember, diff: RoleDiff): Promise<void> {
   for (const roleId of diff.add) {
-    await member.roles.add(roleId, 'Andamio gating: credential satisfied');
+    try {
+      await member.roles.add(roleId, 'Andamio gating: credential satisfied');
+    } catch (err) {
+      console.error(`Gating: failed to add role ${roleId} to ${member.id}:`, err);
+    }
   }
   for (const roleId of diff.remove) {
-    await member.roles.remove(roleId, 'Andamio gating: credential no longer satisfied');
+    try {
+      await member.roles.remove(
+        roleId,
+        'Andamio gating: credential no longer satisfied',
+      );
+    } catch (err) {
+      console.error(
+        `Gating: failed to remove role ${roleId} from ${member.id}:`,
+        err,
+      );
+    }
   }
 }
+
+/** Outcome of a re-evaluation, so interactive callers can report honestly. */
+export type ReevaluationResult = 'updated' | 'skipped' | 'failed';
 
 /**
  * Re-evaluate one member's managed roles against their Andamio state and apply
@@ -93,18 +115,25 @@ async function applyDiff(member: GuildMember, diff: RoleDiff): Promise<void> {
  *     leave roles unchanged. End-user JWTs cannot be refreshed unattended, so
  *     this member simply re-gates the next time they `/login` or `/refresh`
  *     (where the Connect button is offered). No role churn on a stale token.
- *   - Member connected with a valid JWT → read the dashboard, diff, apply. A
- *     `not-found` is treated like "no credentials yet" (remove managed roles);
- *     a 401 (operator key / revoked token) or any transient error aborts this
- *     member without changing roles.
+ *   - Member connected with a valid JWT → read the dashboard, diff, apply. Only
+ *     an authoritative, complete success (HTTP 200) ever removes roles. A
+ *     PARTIAL read (206 — a degraded upstream), a `not-found`, a 401 (operator
+ *     key / revoked token), or any transient error leaves roles unchanged, so a
+ *     blip in the API never strips the whole guild's gated roles.
+ *
+ * Returns the outcome (`updated` | `skipped` | `failed`) so an interactive
+ * caller (`/refresh`) can report honestly. Still never throws — fire-and-forget
+ * callers may ignore the result.
  */
-export async function reevaluateMember(discordId: string): Promise<void> {
-  if (!deps) return; // Not initialised (e.g. in unit tests) — safe no-op.
+export async function reevaluateMember(
+  discordId: string,
+): Promise<ReevaluationResult> {
+  if (!deps) return 'skipped'; // Not initialised (e.g. in unit tests).
   const d = deps;
 
   try {
     const member = await fetchMember(d, discordId);
-    if (!member) return;
+    if (!member) return 'skipped';
 
     const currentRoles = member.roles.cache.map((r) => r.id);
     const link = getLinkByDiscordId(getDb(), discordId);
@@ -112,31 +141,27 @@ export async function reevaluateMember(discordId: string): Promise<void> {
     // Unconnected: ensure NO managed roles (remove any present, add none).
     if (!link) {
       await applyDiff(member, unconnectedDiff(currentRoles, d.mappings));
-      return;
+      return 'updated';
     }
 
     // Connected but no usable JWT → cannot read state unattended; leave roles
     // as-is (re-gates on next interactive /login or /refresh).
     if (!link.user_jwt || isExpired(link.jwt_expires_at)) {
-      return;
+      return 'skipped';
     }
 
-    let state;
+    let result;
     try {
-      state = await getUserDashboard(
+      result = await getUserDashboard(
         d.config.andamioApiBaseUrl,
         d.config.andamioApiKey,
         link.user_jwt,
       );
     } catch (err) {
-      if (err instanceof ApiError && err.kind === 'not-found') {
-        // Connected but no on-chain state yet → no credential roles.
-        await applyDiff(member, unconnectedDiff(currentRoles, d.mappings));
-        return;
-      }
-      // 401 points at the operator key (or a revoked token), not the member —
-      // log it distinctly. Any other error is transient. Either way, don't
-      // churn roles on a failed read.
+      // Never churn roles on a failed read. 401 points at the operator key (or
+      // a revoked token), not the member — log it distinctly. A `not-found` is
+      // treated as a transient/edge condition, NOT authoritative "no
+      // credentials" (that arrives as a successful 200 with an empty state).
       if (err instanceof ApiError && err.kind === 'unauthorized') {
         console.error(
           `Gating: Andamio API 401 for "${link.alias}" (${discordId}) — ` +
@@ -149,24 +174,53 @@ export async function reevaluateMember(discordId: string): Promise<void> {
           err,
         );
       }
-      return;
+      return 'failed';
     }
 
-    await applyDiff(member, evaluate(state, currentRoles, d.mappings));
+    // Degraded (partial) data must not drive role REMOVAL — skip rather than
+    // risk stripping roles the member legitimately holds.
+    if (result.partial) {
+      console.error(
+        `Gating: partial (206) dashboard for "${link.alias}" (${discordId}) — ` +
+          `skipping to avoid churning roles on incomplete data.`,
+      );
+      return 'skipped';
+    }
+
+    await applyDiff(member, evaluate(result.state, currentRoles, d.mappings));
+    return 'updated';
   } catch (err) {
     console.error(`Gating: reevaluateMember failed for ${discordId}:`, err);
+    return 'failed';
   }
 }
+
+/** Guards against overlapping sweeps (a slow sweep outrunning its interval). */
+let sweepInProgress = false;
 
 /**
  * Re-evaluate every connected member (the periodic sweep). Iterates all stored
  * links and re-evaluates each in turn. Errors per member are swallowed inside
  * `reevaluateMember`, so the sweep always completes.
+ *
+ * Re-entrant calls are dropped: if a previous sweep is still running (e.g. a
+ * large guild or a slow API made it outlast the interval), a new tick returns
+ * immediately rather than running a second concurrent sweep that would double
+ * the API load and race on the same members' roles.
  */
 export async function reevaluateAll(): Promise<void> {
   if (!deps) return;
-  const links = getAllLinks(getDb());
-  for (const link of links) {
-    await reevaluateMember(link.discord_id);
+  if (sweepInProgress) {
+    console.warn('Gating: previous sweep still running — skipping this tick.');
+    return;
+  }
+  sweepInProgress = true;
+  try {
+    const links = getAllLinks(getDb());
+    for (const link of links) {
+      await reevaluateMember(link.discord_id);
+    }
+  } finally {
+    sweepInProgress = false;
   }
 }
