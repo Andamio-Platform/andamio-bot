@@ -4,8 +4,12 @@ import type { Db } from '../db/index';
 import { consumePending, storeLink } from '../andamio/login';
 import { reevaluateMember } from '../gating/triggers';
 
-/** Re-evaluation hook fired after a successful link (U5 makes it real). */
-export type ReevaluateHook = (discordId: string) => void | Promise<void>;
+/**
+ * Re-evaluation hook fired after a successful link. Called fire-and-forget, so
+ * any return value is ignored (reevaluateMember returns an outcome the callback
+ * does not use).
+ */
+export type ReevaluateHook = (discordId: string) => unknown;
 
 export interface CallbackServerOptions {
   db: Db;
@@ -38,7 +42,9 @@ export function handleCallback(
 ): { status: number; html: string; linkedDiscordId?: string } {
   const state = query.get('state') ?? '';
   const alias = query.get('alias') ?? '';
-  // jwt and user_id are present for proof but intentionally not persisted.
+  // The user JWT is persisted: it is the member's `Authorization: Bearer` for
+  // authenticated Andamio dashboard reads. user_id is proof only, not stored.
+  const jwt = query.get('jwt');
 
   if (!state) {
     return {
@@ -82,7 +88,7 @@ export function handleCallback(
     };
   }
 
-  storeLink(db, result.pending.discord_id, alias);
+  storeLink(db, result.pending.discord_id, alias, jwt);
 
   return {
     status: 200,

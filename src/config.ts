@@ -9,8 +9,13 @@ export interface Config {
   discordAppId: string;
   /** Discord guild (server) id the bot operates in. */
   guildId: string;
-  /** andamioscan base URL (public read API). No trailing slash. */
-  scanBaseUrl: string;
+  /** Andamio API base URL (authenticated read API). No trailing slash. */
+  andamioApiBaseUrl: string;
+  /**
+   * Operator-level Andamio API key (mainnet `ant_mn_…`). SECRET — sent as the
+   * `X-API-Key` header on every Andamio API call. Never log or commit it.
+   */
+  andamioApiKey: string;
   /** Andamio app base URL hosting the CLI login flow. No trailing slash. */
   appLoginBaseUrl: string;
   /** Public https base URL where the bot receives the auth callback. No trailing slash. */
@@ -26,7 +31,8 @@ const REQUIRED_VARS = [
   'DISCORD_TOKEN',
   'DISCORD_APP_ID',
   'GUILD_ID',
-  'SCAN_BASE_URL',
+  'ANDAMIO_API_BASE_URL',
+  'ANDAMIO_API_KEY',
   'APP_LOGIN_BASE_URL',
   'BOT_CALLBACK_BASE_URL',
   'ROLE_MAPPINGS_PATH',
@@ -34,7 +40,11 @@ const REQUIRED_VARS = [
 ] as const;
 
 /** Env vars that must parse as valid http(s) URLs. */
-const URL_VARS = ['SCAN_BASE_URL', 'APP_LOGIN_BASE_URL', 'BOT_CALLBACK_BASE_URL'] as const;
+const URL_VARS = [
+  'ANDAMIO_API_BASE_URL',
+  'APP_LOGIN_BASE_URL',
+  'BOT_CALLBACK_BASE_URL',
+] as const;
 
 function assertValidUrl(name: string, value: string): void {
   let parsed: URL;
@@ -73,7 +83,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     discordToken: env.DISCORD_TOKEN as string,
     discordAppId: env.DISCORD_APP_ID as string,
     guildId: env.GUILD_ID as string,
-    scanBaseUrl: stripTrailingSlash(env.SCAN_BASE_URL as string),
+    andamioApiBaseUrl: stripTrailingSlash(env.ANDAMIO_API_BASE_URL as string),
+    andamioApiKey: env.ANDAMIO_API_KEY as string,
     appLoginBaseUrl: stripTrailingSlash(env.APP_LOGIN_BASE_URL as string),
     botCallbackBaseUrl: stripTrailingSlash(env.BOT_CALLBACK_BASE_URL as string),
     roleMappingsPath: env.ROLE_MAPPINGS_PATH as string,

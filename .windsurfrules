@@ -2,4 +2,4 @@
 - My project's programming language is TypeScript
 - This project is build with Node.js
 - This project is a discord.js bot
-- This project consumes data via GET requests from the Andamio API at https://app.andamio.com/api
+- This project reads member data from the authenticated Andamio API (POST /api/v2/user/dashboard) using an operator X-API-Key plus the member's Bearer JWT

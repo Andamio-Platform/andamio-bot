@@ -48,12 +48,20 @@ describe('startLogin', () => {
     );
   });
 
-  it('mints a distinct state on each call (re-login overwrites later)', () => {
+  it('mints a distinct state each call; a new login for the same id invalidates the prior pending', () => {
     const first = startLogin(db, 'd', 'https://a', 'https://b');
     const second = startLogin(db, 'd', 'https://a', 'https://b');
     expect(first.state).not.toBe(second.state);
-    expect(getPendingByState(db, first.state)).not.toBeNull();
+    // Dedup: only one live login per member — the new one supersedes the old.
+    expect(getPendingByState(db, first.state)).toBeNull();
     expect(getPendingByState(db, second.state)).not.toBeNull();
+  });
+
+  it('keeps separate pending rows for different members', () => {
+    const a = startLogin(db, 'member-a', 'https://a', 'https://b');
+    const b = startLogin(db, 'member-b', 'https://a', 'https://b');
+    expect(getPendingByState(db, a.state)).not.toBeNull();
+    expect(getPendingByState(db, b.state)).not.toBeNull();
   });
 });
 
@@ -105,10 +113,28 @@ describe('storeLink', () => {
     db.close();
   });
 
-  it('persists discord_id ↔ alias with no refresh token (alias is the key)', () => {
+  it('persists discord_id ↔ alias; no JWT given → user_jwt null', () => {
     storeLink(db, 'discord-1', 'alice');
     const link = getLinkByDiscordId(db, 'discord-1');
     expect(link?.alias).toBe('alice');
+    expect(link?.user_jwt).toBeNull();
+    expect(link?.jwt_expires_at).toBeNull();
     expect(link?.refresh_token).toBeNull();
+  });
+
+  it('persists the user JWT and its decoded expiry when provided', () => {
+    const expSeconds = 1_900_000_000;
+    const header = Buffer.from(JSON.stringify({ alg: 'HS256' })).toString(
+      'base64url',
+    );
+    const body = Buffer.from(JSON.stringify({ exp: expSeconds })).toString(
+      'base64url',
+    );
+    const jwt = `${header}.${body}.sig`;
+
+    storeLink(db, 'discord-2', 'bob', jwt);
+    const link = getLinkByDiscordId(db, 'discord-2');
+    expect(link?.user_jwt).toBe(jwt);
+    expect(link?.jwt_expires_at).toBe(expSeconds * 1000);
   });
 });

@@ -8,6 +8,7 @@ import {
   upsertLink,
   type PendingLogin,
 } from '../db/links';
+import { decodeJwtExpiryMs } from './jwt';
 
 /** Default lifetime of a pending login before it is considered expired (ms). */
 export const PENDING_TTL_MS = 10 * 60 * 1000; // 10 minutes
@@ -89,10 +90,19 @@ export function consumePending(
 }
 
 /**
- * Persist a proven link. The user flow returns `alias` (no refresh token), so
- * the alias is the durable key; `refresh_token` is left null. The JWT is proof
- * only and is never persisted.
+ * Persist a proven link. The user flow returns `alias` plus the member's user
+ * JWT; we store both (the JWT is the `Authorization: Bearer` for the dashboard
+ * read) along with the JWT's decoded expiry, so reads can detect a stale token
+ * and prompt a reconnect. `refresh_token` stays null (end-user JWTs have no
+ * unattended refresh). A missing/malformed `jwt` stores a null token — the link
+ * is still useful for display, and reads will prompt the member to connect.
  */
-export function storeLink(db: Db, discordId: string, alias: string): void {
-  upsertLink(db, discordId, alias, null);
+export function storeLink(
+  db: Db,
+  discordId: string,
+  alias: string,
+  jwt: string | null = null,
+): void {
+  const expiresAt = jwt ? decodeJwtExpiryMs(jwt) : null;
+  upsertLink(db, discordId, alias, null, jwt, expiresAt);
 }

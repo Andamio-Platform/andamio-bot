@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import Database from 'better-sqlite3';
 import { openDb, migrate, type Db } from './index';
 import {
   upsertLink,
@@ -27,6 +28,43 @@ describe('db migration', () => {
     expect(tables).toContain('pending_logins');
     db.close();
   });
+
+  it('upgrades an older links table by adding the JWT columns, preserving rows', () => {
+    // Simulate a database created before the JWT columns existed.
+    const raw = new Database(':memory:');
+    raw.exec(`
+      CREATE TABLE links (
+        discord_id    TEXT PRIMARY KEY,
+        alias         TEXT NOT NULL,
+        refresh_token TEXT,
+        updated_at    INTEGER
+      );
+    `);
+    raw
+      .prepare(
+        `INSERT INTO links (discord_id, alias, refresh_token, updated_at) VALUES (?,?,?,?)`,
+      )
+      .run('d1', 'alice', null, 123);
+
+    migrate(raw as Db);
+
+    const cols = (
+      raw.prepare(`PRAGMA table_info(links)`).all() as { name: string }[]
+    ).map((c) => c.name);
+    expect(cols).toContain('user_jwt');
+    expect(cols).toContain('jwt_expires_at');
+
+    // Existing row is preserved; new columns default to null.
+    const row = raw
+      .prepare(`SELECT * FROM links WHERE discord_id = ?`)
+      .get('d1') as { alias: string; user_jwt: string | null };
+    expect(row.alias).toBe('alice');
+    expect(row.user_jwt).toBeNull();
+
+    // Re-running the migration is a no-op (no duplicate-column error).
+    expect(() => migrate(raw as Db)).not.toThrow();
+    raw.close();
+  });
 });
 
 describe('links accessors', () => {
@@ -54,6 +92,13 @@ describe('links accessors', () => {
     upsertLink(db, 'discord-2', 'bob');
     const link = getLinkByDiscordId(db, 'discord-2');
     expect(link?.refresh_token).toBeNull();
+  });
+
+  it('persists the user JWT and its expiry', () => {
+    upsertLink(db, 'discord-5', 'eve', null, 'jwt.value.x', 1_234_567);
+    const link = getLinkByDiscordId(db, 'discord-5');
+    expect(link?.user_jwt).toBe('jwt.value.x');
+    expect(link?.jwt_expires_at).toBe(1_234_567);
   });
 
   it('upsert on an existing discord id overwrites alias and refresh token', () => {

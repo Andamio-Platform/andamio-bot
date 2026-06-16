@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 
-import type { UserState } from '../andamio/scan-client';
+import type { UserState } from '../andamio/dashboard-client';
 import { parseMappings, type Mappings } from './mappings';
 import { evaluate, desiredRoles, unconnectedDiff } from './evaluator';
 
