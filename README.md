@@ -180,22 +180,27 @@ offending rule, on: a non-array top level, an unknown/missing `type`, a missing
 `course_id`/`role_id`, a `credential` rule without `slt_hash`, a non-http(s)
 `earn_url`, or an empty `label`. A typo can never silently disable gating.
 
-## 4. Install, build, deploy commands, run
+## 4. Install, build, run
 
 ```
 npm install          # install dependencies
 npm run build        # compile TypeScript to dist/
-npm run deploy       # register the slash commands with your guild (deploy-commands)
 npm start            # run the bot (node dist/index.js)
 ```
 
-- `npm run deploy` runs `src/deploy-commands.ts`, registering `/login`,
-  `/logout`, `/credentials`, `/available`, and `/check` as **guild** commands for
-  your `GUILD_ID` (instant, vs. global commands which take up to an hour). Re-run
-  it whenever the command definitions change.
+- **Commands register themselves on boot.** On `ClientReady` the bot PUTs its
+  current command set (`/login`, `/logout`, `/credentials`, `/available`,
+  `/check`) as **guild** commands for your `GUILD_ID` (instant, vs. global
+  commands which take up to an hour). So **a deploy is all it takes** to add,
+  rename, or remove a command — a removed command disappears on the next boot.
+  Registration is best-effort: a transient failure leaves the previously
+  registered set working and never takes the bot down.
+- `npm run deploy` (optional) runs `src/deploy-commands.ts` to register the same
+  set **without** starting the bot — handy when forking or to push a command
+  change before the next deploy.
 - `npm start` boots the bot and the callback web server together. On a clean
-  start it logs the logged-in tag, how many roles/rules gating manages, and the
-  sweep interval.
+  start it logs the logged-in tag, the registered command count, how many
+  roles/rules gating manages, and the sweep interval.
 
 For local development: `npm run dev` runs from source (ts-node) and
 `npm run watch` reloads on change. `npm test` runs the suite (vitest);

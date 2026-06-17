@@ -18,6 +18,7 @@ import { loadMappings } from './gating/mappings';
 import { initGating, reevaluateAll, reevaluateMember } from './gating/triggers';
 import { startCallbackServer } from './web/server';
 import { isCommandModule } from './command-loader';
+import { registerGuildCommands } from './discord/register';
 
 interface Command {
   data: {
@@ -97,12 +98,32 @@ function main(): void {
 
   loadCommands(client);
 
-  client.once(Events.ClientReady, (readyClient) => {
+  client.once(Events.ClientReady, async (readyClient) => {
     console.log(`Ready! Logged in as ${readyClient.user.tag}`);
     console.log(
       `Gating managing ${mappings.managedRoleIds.size} role(s) across ` +
         `${mappings.rules.length} rule(s).`,
     );
+
+    // Self-register the guild's slash commands on every boot, so a deploy is all
+    // it takes to add/rename/remove a command (the PUT fully replaces the set).
+    // Best-effort: a transient failure here leaves the previously registered
+    // commands working, so it must never take the bot down.
+    try {
+      const bodies = [...client.commands.values()].map((c) => c.data.toJSON());
+      await registerGuildCommands(
+        config.discordToken,
+        config.discordAppId,
+        config.guildId,
+        bodies,
+      );
+      console.log(`Registered ${bodies.length} guild command(s).`);
+    } catch (err) {
+      console.error(
+        'Command registration failed (existing commands still work):',
+        err,
+      );
+    }
 
     // Periodic sweep: re-evaluate every connected member so credentials earned
     // (or lost) since their last interaction are reflected without a re-login.
