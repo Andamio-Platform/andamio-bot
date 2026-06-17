@@ -15,10 +15,12 @@ import {
 } from '../andamio/dashboard-client';
 import { isExpired } from '../andamio/jwt';
 import { buildReloginPrompt } from '../discord/relogin-prompt';
+import { loadCourseDisplayNames, loadShowAllCourses } from '../andamio/course-names';
+import { loadMappings } from '../gating/mappings';
 import {
   displayNameFor,
-  loadCourseDisplayNames,
-  type CourseDisplayNames,
+  isDisplayed,
+  type DisplayFilter,
 } from '../andamio/course-names';
 
 export const data = new SlashCommandBuilder()
@@ -28,21 +30,28 @@ export const data = new SlashCommandBuilder()
 /**
  * Build the ephemeral embed for a connected member's earned credentials.
  *
- * This is the member's personal inventory only — what they hold. The "what this
- * server gates on / what you're missing" view lives in `/available` and
- * `/check`, so this command stays a clean, read-only list.
+ * Personal inventory only — what they hold. The "what this server gates on /
+ * what you're missing" view lives in `/available` and `/check`. Courses are
+ * filtered through `filter` (curated display, see course-names.ts): only courses
+ * the deployer chose to surface (plus gated ones) appear, unless the map is
+ * empty or `SHOW_ALL_COURSES` is set.
  */
 export function renderCredentialsEmbed(
   state: UserState,
-  names: CourseDisplayNames = {},
+  filter: DisplayFilter,
 ): EmbedBuilder {
+  const { names } = filter;
   const embed = new EmbedBuilder()
     .setTitle('Your Andamio Credentials')
     .setDescription(`Connected as \`${state.alias}\`.`);
 
-  // Completed section: display name + count of earned credentials per course.
-  if (state.completedCourses.length > 0) {
-    const lines = state.completedCourses.map((c) => {
+  // Completed section: display name + count of earned credentials per course,
+  // restricted to courses this server chooses to surface.
+  const completed = state.completedCourses.filter((c) =>
+    isDisplayed(c.courseId, filter),
+  );
+  if (completed.length > 0) {
+    const lines = completed.map((c) => {
       const name = displayNameFor(c.courseId, names);
       const n = c.claimedCredentials.length;
       return `• **${name}** — ${n} credential${n === 1 ? '' : 's'}`;
@@ -55,9 +64,11 @@ export function renderCredentialsEmbed(
     });
   }
 
-  // Enrolled (in progress): enrolled courses that are not already completed.
+  // Enrolled (in progress): enrolled courses not already completed, same filter.
   const completedIds = new Set(state.completedCourses.map((c) => c.courseId));
-  const inProgress = state.enrolledCourses.filter((id) => !completedIds.has(id));
+  const inProgress = state.enrolledCourses
+    .filter((id) => !completedIds.has(id))
+    .filter((id) => isDisplayed(id, filter));
   if (inProgress.length > 0) {
     const lines = inProgress.map((id) => `• ${displayNameFor(id, names)}`);
     embed.addFields({ name: 'Enrolled (in progress)', value: lines.join('\n') });
@@ -100,7 +111,20 @@ export async function execute(
     return;
   }
 
+  // Build the curated-display filter: the labels map doubles as the visibility
+  // allow-list (course-names.ts). Gated courses (named by a role-mapping rule)
+  // are always shown, so load the mappings for their course ids; a config
+  // problem here must never break /credentials, so fall back to no gated set.
   const names = loadCourseDisplayNames();
+  const showAll = loadShowAllCourses();
+  let gatedCourseIds: ReadonlySet<string> = new Set();
+  try {
+    const mappings = loadMappings(config.roleMappingsPath);
+    gatedCourseIds = new Set(mappings.rules.map((r) => r.course_id));
+  } catch (err) {
+    console.error('Could not load role-mappings for display curation:', err);
+  }
+  const filter: DisplayFilter = { names, showAll, gatedCourseIds };
 
   let state: UserState;
   try {
@@ -139,6 +163,6 @@ export async function execute(
     return;
   }
 
-  const embed = renderCredentialsEmbed(state, names);
+  const embed = renderCredentialsEmbed(state, filter);
   await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
 }
