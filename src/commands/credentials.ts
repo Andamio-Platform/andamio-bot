@@ -20,18 +20,21 @@ import {
   loadCourseDisplayNames,
   type CourseDisplayNames,
 } from '../andamio/course-names';
-import { loadMappings, type Mappings } from '../gating/mappings';
-import { ruleSatisfied } from '../gating/evaluator';
 
 export const data = new SlashCommandBuilder()
   .setName('credentials')
-  .setDescription('Show your Andamio connection status and earned credentials.');
+  .setDescription('Show the Andamio credentials you have earned.');
 
-/** Build the ephemeral embed for a connected member's state. */
+/**
+ * Build the ephemeral embed for a connected member's earned credentials.
+ *
+ * This is the member's personal inventory only — what they hold. The "what this
+ * server gates on / what you're missing" view lives in `/available` and
+ * `/check`, so this command stays a clean, read-only list.
+ */
 export function renderCredentialsEmbed(
   state: UserState,
   names: CourseDisplayNames = {},
-  mappings?: Mappings,
 ): EmbedBuilder {
   const embed = new EmbedBuilder()
     .setTitle('Your Andamio Credentials')
@@ -58,24 +61,6 @@ export function renderCredentialsEmbed(
   if (inProgress.length > 0) {
     const lines = inProgress.map((id) => `• ${displayNameFor(id, names)}`);
     embed.addFields({ name: 'Enrolled (in progress)', value: lines.join('\n') });
-  }
-
-  // Earn-it hints: any rule with an `earn_url` the member does not yet satisfy.
-  // Turns a gate the member is missing into a call to action. De-duped by URL,
-  // since several rules may point at the same place to earn.
-  if (mappings) {
-    const seen = new Set<string>();
-    const lines: string[] = [];
-    for (const rule of mappings.rules) {
-      if (rule.earn_url === undefined || ruleSatisfied(rule, state)) continue;
-      if (seen.has(rule.earn_url)) continue;
-      seen.add(rule.earn_url);
-      const label = rule.label ?? displayNameFor(rule.course_id, names);
-      lines.push(`• **${label}** — earn it: ${rule.earn_url}`);
-    }
-    if (lines.length > 0) {
-      embed.addFields({ name: 'Earn more', value: lines.join('\n') });
-    }
   }
 
   return embed;
@@ -117,15 +102,6 @@ export async function execute(
 
   const names = loadCourseDisplayNames();
 
-  // Load mappings for the earn-it hints. A config problem here must never break
-  // the core /credentials output, so fall back to no hints on failure.
-  let mappings: Mappings | undefined;
-  try {
-    mappings = loadMappings(config.roleMappingsPath);
-  } catch (err) {
-    console.error('Could not load role-mappings for earn-it hints:', err);
-  }
-
   let state: UserState;
   try {
     // Partial (206) reads are fine to display as-is; only role gating must be
@@ -163,6 +139,6 @@ export async function execute(
     return;
   }
 
-  const embed = renderCredentialsEmbed(state, names, mappings);
+  const embed = renderCredentialsEmbed(state, names);
   await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
 }

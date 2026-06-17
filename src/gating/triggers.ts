@@ -23,7 +23,11 @@ import type { Client, GuildMember } from 'discord.js';
 import type { Config } from '../config';
 import { getDb } from '../db/handle';
 import { getAllLinks, getLinkByDiscordId } from '../db/links';
-import { getUserDashboard, ApiError } from '../andamio/dashboard-client';
+import {
+  getUserDashboard,
+  ApiError,
+  type UserState,
+} from '../andamio/dashboard-client';
 import { isExpired } from '../andamio/jwt';
 import { evaluate, unconnectedDiff, type RoleDiff } from './evaluator';
 import type { Mappings } from './mappings';
@@ -219,6 +223,36 @@ export async function reevaluateMember(
     return 'updated';
   } catch (err) {
     console.error(`Gating: reevaluateMember failed for ${discordId}:`, err);
+    return 'failed';
+  }
+}
+
+/**
+ * Apply gating to one member from an ALREADY-FETCHED dashboard state.
+ *
+ * This is the read-once path for an interactive command (`/check`) that has just
+ * read the dashboard for display: instead of making {@link reevaluateMember}
+ * fetch it a second time, the command passes the state straight in. It reuses
+ * the same guild-member fetch + per-role-isolated apply as the sweep.
+ *
+ * The caller MUST pass only a COMPLETE (non-partial) state — partial/degraded
+ * reads must never drive role removal (the command skips this call when its read
+ * was partial). Returns the outcome; never throws.
+ */
+export async function gateMemberFromState(
+  discordId: string,
+  state: UserState,
+): Promise<ReevaluationResult> {
+  if (!deps) return 'skipped';
+  const d = deps;
+  try {
+    const member = await fetchMember(d, discordId);
+    if (!member) return 'skipped';
+    const currentRoles = member.roles.cache.map((r) => r.id);
+    await applyDiff(member, evaluate(state, currentRoles, d.mappings));
+    return 'updated';
+  } catch (err) {
+    console.error(`Gating: gateMemberFromState failed for ${discordId}:`, err);
     return 'failed';
   }
 }
