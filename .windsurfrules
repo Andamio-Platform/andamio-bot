@@ -1,0 +1,5 @@
+# Coding Guidelines
+- My project's programming language is TypeScript
+- This project is build with Node.js
+- This project is a discord.js bot
+- This project reads member data from the authenticated Andamio API (POST /api/v2/user/dashboard) using an operator X-API-Key plus the member's Bearer JWT
