@@ -1,4 +1,4 @@
-# Andamio Discord Bot
+# Andamio Bot
 
 A reusable TypeScript Discord bot that brings Andamio on-chain credentials into a
 Discord community. A member proves they control an Andamio alias with `/login`,
