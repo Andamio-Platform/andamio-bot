@@ -88,6 +88,6 @@ JWT missing/expired → skip unattended; prompt reconnect interactively
 
 ## Related
 
-- PR Andamio-Platform/andamio-discord-bot-nodejs#5 (the dashboard-auth refactor)
+- PR Andamio-Platform/andamio-bot#5 (the dashboard-auth refactor)
 - `docs/plans/2026-06-16-001-refactor-credentials-via-dashboard-api-plan.md`
 - Source of truth for the auth model: `andamio-api/internal/middleware/v2_auth_middleware.go` (HS256 → `accessTokenAlias`; RS256 → operator alias) and `internal/handlers/v2/merged_handlers/merged_handlers.go` (`GetUserDashboard`).
