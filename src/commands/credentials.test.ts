@@ -42,6 +42,14 @@ vi.mock('../andamio/dashboard-client', async (importOriginal) => {
   };
 });
 
+// execute() loads role-mappings to learn the always-shown gated course ids.
+// Default to an empty rule set; tests that care override it.
+const loadMappings = vi.fn(() => ({ rules: [], managedRoleIds: new Set<string>() }));
+vi.mock('../gating/mappings', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../gating/mappings')>();
+  return { ...actual, loadMappings: () => loadMappings() };
+});
+
 // The Connect-button helper is unit-tested separately; here we just assert it
 // is invoked (and with which variant), so stub it to a recognizable payload.
 const buildReloginPrompt = vi.fn(
@@ -88,10 +96,19 @@ const state = (over: Partial<UserState> = {}): UserState => ({
   ...over,
 });
 
+/** Build a DisplayFilter for direct renderCredentialsEmbed tests. */
+const filterOf = (
+  names: Record<string, string> = {},
+  showAll = false,
+  gated: string[] = [],
+) => ({ names, showAll, gatedCourseIds: new Set(gated) });
+
 beforeEach(() => {
   getLinkByDiscordId.mockReset();
   getUserDashboard.mockReset();
   buildReloginPrompt.mockClear();
+  loadMappings.mockClear();
+  loadMappings.mockReturnValue({ rules: [], managedRoleIds: new Set<string>() });
 });
 
 afterEach(() => {
@@ -263,6 +280,7 @@ describe('renderCredentialsEmbed', () => {
   it('defaults to the raw course_id when no display-name map is given', () => {
     const embed = renderCredentialsEmbed(
       state({ completedCourses: [{ courseId: 'course_abc', claimedCredentials: [] }] }),
+      filterOf(),
     ).toJSON();
     const completed = embed.fields.find((f: { name: string }) => f.name === 'Completed');
     expect(completed.value).toContain('course_abc');
@@ -271,7 +289,7 @@ describe('renderCredentialsEmbed', () => {
   it('uses a display name when one is provided for the course_id', () => {
     const embed = renderCredentialsEmbed(
       state({ completedCourses: [{ courseId: 'course_abc', claimedCredentials: ['x'] }] }),
-      { course_abc: 'Cardano 101' },
+      filterOf({ course_abc: 'Cardano 101' }),
     ).toJSON();
     const completed = embed.fields.find((f: { name: string }) => f.name === 'Completed');
     expect(completed.value).toContain('Cardano 101');
@@ -281,9 +299,61 @@ describe('renderCredentialsEmbed', () => {
   it('no longer renders an Earn more field (moved to /available + /check)', () => {
     const embed = renderCredentialsEmbed(
       state({ completedCourses: [{ courseId: 'c1', claimedCredentials: [] }] }),
+      filterOf(),
     ).toJSON();
     expect(
       embed.fields.find((f: { name: string }) => f.name === 'Earn more'),
     ).toBeUndefined();
+  });
+});
+
+// --- renderCredentialsEmbed (curated display, U9) --------------------------
+
+describe('renderCredentialsEmbed — curation', () => {
+  const twoCompleted = state({
+    completedCourses: [
+      { courseId: 'shown', claimedCredentials: ['s1'] },
+      { courseId: 'hidden', claimedCredentials: ['s2'] },
+    ],
+  });
+  const completedValue = (filter: ReturnType<typeof filterOf>) =>
+    renderCredentialsEmbed(twoCompleted, filter)
+      .toJSON()
+      .fields.find((f: { name: string }) => f.name === 'Completed')!.value;
+
+  it('a non-empty map hides courses not in it', () => {
+    const v = completedValue(filterOf({ shown: 'Shown Course' }));
+    expect(v).toContain('Shown Course');
+    expect(v).not.toContain('hidden');
+  });
+
+  it('SHOW_ALL_COURSES shows courses absent from the map', () => {
+    const v = completedValue(filterOf({ shown: 'Shown Course' }, true));
+    expect(v).toContain('Shown Course');
+    expect(v).toContain('hidden');
+  });
+
+  it('an unmapped but gated course is always shown', () => {
+    const v = completedValue(filterOf({ shown: 'Shown Course' }, false, ['hidden']));
+    expect(v).toContain('Shown Course');
+    expect(v).toContain('hidden');
+  });
+
+  it('an empty map shows everything (back-compat)', () => {
+    const v = completedValue(filterOf());
+    expect(v).toContain('shown');
+    expect(v).toContain('hidden');
+  });
+
+  it('filters enrolled (in-progress) courses too', () => {
+    const embed = renderCredentialsEmbed(
+      state({ enrolledCourses: ['shown', 'hidden'] }),
+      filterOf({ shown: 'Shown Course' }),
+    ).toJSON();
+    const enrolled = embed.fields.find(
+      (f: { name: string }) => f.name === 'Enrolled (in progress)',
+    );
+    expect(enrolled.value).toContain('Shown Course');
+    expect(enrolled.value).not.toContain('hidden');
   });
 });
