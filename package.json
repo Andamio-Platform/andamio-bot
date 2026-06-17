@@ -1,5 +1,5 @@
 {
-  "name": "andamio-discord-bot",
+  "name": "andamio-bot",
   "version": "1.0.0",
   "description": "A Discord bot that surfaces Andamio on-chain credentials and gates Discord roles on them",
   "main": "dist/index.js",
