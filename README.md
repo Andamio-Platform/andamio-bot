@@ -21,8 +21,9 @@ own Discord guild and an Andamio (preprod) deployment with **no code changes**.
 |---------|--------------|
 | `/login` | Replies with an ephemeral link to the Andamio hosted login. The member authenticates in their browser; the app redirects the result back to the bot, which stores `discord_id ↔ alias`. Re-running it re-links. |
 | `/logout` | Unlinks the member's Discord account from their Andamio alias. |
-| `/credentials` | Shows the member their connection status, alias, and earned credentials grouped by course (ephemeral). Also lists any gated credentials they have not yet earned, with a link to earn each (when `earn_url` is set in the mappings). |
-| `/refresh` | Re-checks the member's Andamio credentials and updates their roles on demand. |
+| `/credentials` | Shows the member the Andamio credentials they have earned, grouped by course (ephemeral). Personal inventory only — what they hold. |
+| `/available` | Lists the credentials this server gates channels on, each marked ✅/⬜ for whether the member holds it, with a link to earn the ones they lack. Works before connecting (shows the catalog without the ✓/✗ overlay). |
+| `/check` | Re-reads the member's Andamio credentials live, updates their roles, and reports which gated credentials they hold and which they still need (with earn links). One command to both refresh roles and see where you stand. |
 
 **How it works**
 
@@ -36,12 +37,12 @@ own Discord guild and an Andamio (preprod) deployment with **no code changes**.
   dashboard to read. The dashboard is scoped to the JWT's user.
 - Configurable rules (`role-mappings.json`) map earned credentials to Discord
   roles. The bot grants and revokes **only** the roles it manages.
-- Roles re-evaluate on `/login`, `/refresh`, when a member (re)joins the guild,
-  and on a periodic background sweep. End-user JWTs expire and cannot be
-  refreshed unattended: a member whose JWT has lapsed keeps their current roles
-  until they reconnect (the bot shows a one-click **Connect** button on
-  `/credentials` and `/refresh`). The background sweep skips lapsed members
-  rather than churning their roles.
+- Roles re-evaluate on `/login`, on `/check` (on demand), when a member (re)joins
+  the guild, and on a periodic background sweep. End-user JWTs expire and cannot
+  be refreshed unattended: a member whose JWT has lapsed keeps their current
+  roles until they reconnect (the bot shows a one-click **Connect** button on
+  `/credentials`, `/available`, and `/check`). The background sweep skips lapsed
+  members rather than churning their roles.
 
 The datastore is SQLite (`better-sqlite3`) — file-based, zero-ops.
 
@@ -98,7 +99,7 @@ Every variable, what it's for, and an example value:
 | `BOT_CALLBACK_BASE_URL` | yes | Public https base URL where the bot receives the auth callback (`GET <this>/callback`); its origin must be in the app's allowlist (see Operating notes), no trailing slash | `https://your-bot-host.example.com` |
 | `ROLE_MAPPINGS_PATH` | yes | Path to the role-mappings JSON config | `./config/role-mappings.json` |
 | `DB_PATH` | yes | Path to the SQLite database file (created on first run) | `./data/bot.sqlite` |
-| `COURSE_DISPLAY_NAMES` | no | `course_id → display name` map (JSON object) for `/credentials`; falls back to raw course ids if unset/malformed. Default `{}` | `{"course_cardano_101":"Cardano 101"}` |
+| `COURSE_DISPLAY_NAMES` | no | `course_id → display name` map (JSON object) used by `/credentials`, `/available`, and `/check` to show friendly course names; falls back to raw course ids if unset/malformed. Independent of `role-mappings.json`. Default `{}` | `{"course_cardano_101":"Cardano 101"}` |
 | `GATING_SWEEP_INTERVAL_MS` | no | Interval (ms) for the periodic role-sweep over connected members. Positive number; default 15 min | `900000` |
 | `PORT` | no | Port the callback web server listens on. Default 3000 | `3000` |
 
@@ -136,7 +137,7 @@ moderator/booster/etc. role).
 | `course_id` | yes | The Andamio course the rule keys on | From your Andamio course / the Andamio API |
 | `slt_hash` | only for `credential` | The specific credential within the course | From the course's credential definition |
 | `role_id` | yes | The Discord role to grant | Discord → enable Developer Mode → right-click the role → Copy Role ID |
-| `label` | no | Human name for the gate (e.g. `"Andamio Developer"`), used in the `/credentials` earn-it hint | You choose it |
+| `label` | no | Human name for the gate (e.g. `"Andamio Issuer"`), shown in `/available` and `/check` | You choose it |
 | `earn_url` | no | http(s) link to earn what the rule requires | Your course/credential's public page |
 
 ### Rule types
@@ -149,10 +150,10 @@ moderator/booster/etc. role).
   **and** holds the specific credential `slt_hash`. `slt_hash` is **required**.
 
 The two optional fields (`label`, `earn_url`) **never affect gating** — they only
-drive the call to action. When `earn_url` is set, `/credentials` shows it to a
-connected member who does **not** yet satisfy the rule, so non-holders see
-exactly how to unlock the gated channel (de-duped by URL across rules); `label`
-names the gate there, falling back to the course display name when absent.
+drive the call to action. When `earn_url` is set, `/available` and `/check` show
+it to a member who does **not** yet satisfy the rule, so non-holders see exactly
+how to unlock the gated channel; `label` names the gate there, falling back to
+the course display name when absent.
 
 ### The demo config (what ships)
 
@@ -189,9 +190,9 @@ npm start            # run the bot (node dist/index.js)
 ```
 
 - `npm run deploy` runs `src/deploy-commands.ts`, registering `/login`,
-  `/logout`, `/credentials`, and `/refresh` as **guild** commands for your
-  `GUILD_ID` (instant, vs. global commands which take up to an hour). Re-run it
-  whenever the command definitions change.
+  `/logout`, `/credentials`, `/available`, and `/check` as **guild** commands for
+  your `GUILD_ID` (instant, vs. global commands which take up to an hour). Re-run
+  it whenever the command definitions change.
 - `npm start` boots the bot and the callback web server together. On a clean
   start it logs the logged-in tag, how many roles/rules gating manages, and the
   sweep interval.
@@ -222,15 +223,15 @@ For local development: `npm run dev` runs from source (ts-node) and
 - **Unconnected members get no credential roles.** A member must `/login` to earn
   any mapped role; if they `/logout` (or were never linked), the bot removes any
   managed roles they hold on the next evaluation.
-- **Re-evaluation timing.** Roles update on `/login`, on `/refresh` (on demand),
+- **Re-evaluation timing.** Roles update on `/login`, on `/check` (on demand),
   when a member rejoins, and on the periodic sweep (`GATING_SWEEP_INTERVAL_MS`,
   default 15 min) — for members whose login JWT is still valid.
 - **Member JWTs expire; reconnection is one click.** Reads use the member's
   Andamio login JWT, which has a finite lifetime and cannot be refreshed without
-  the member. When it lapses, `/credentials` and `/refresh` reply with a
-  **Connect** button (a fresh `/login` link); the background sweep skips the
-  member rather than churning their roles, so they keep their current roles until
-  they reconnect.
+  the member. When it lapses, `/credentials`, `/available`, and `/check` reply
+  with a **Connect** button (a fresh `/login` link); the background sweep skips
+  the member rather than churning their roles, so they keep their current roles
+  until they reconnect.
 - **The SQLite store holds secrets.** Beyond the `discord_id ↔ alias` link, the
   database persists each member's user JWT. Keep `DB_PATH` on a private,
   persistent volume (and never commit `data/`) — losing it just forces everyone

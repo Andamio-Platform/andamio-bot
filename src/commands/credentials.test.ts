@@ -11,7 +11,6 @@ import {
 
 import { renderCredentialsEmbed } from './credentials';
 import type { UserState } from '../andamio/dashboard-client';
-import type { Mappings, MappingRule } from '../gating/mappings';
 
 // --- module mocks ----------------------------------------------------------
 
@@ -24,15 +23,6 @@ vi.mock('../config', () => ({
     roleMappingsPath: '/tmp/role-mappings.json',
   }),
 }));
-
-const loadMappings = vi.fn<[], Mappings>(() => ({
-  rules: [],
-  managedRoleIds: new Set<string>(),
-}));
-vi.mock('../gating/mappings', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../gating/mappings')>();
-  return { ...actual, loadMappings: () => loadMappings() };
-});
 
 const getDb = vi.fn(() => ({}) as unknown);
 vi.mock('../db/handle', () => ({ getDb: () => getDb() }));
@@ -98,17 +88,10 @@ const state = (over: Partial<UserState> = {}): UserState => ({
   ...over,
 });
 
-const mappingsOf = (rules: MappingRule[]): Mappings => ({
-  rules,
-  managedRoleIds: new Set(rules.map((r) => r.role_id)),
-});
-
 beforeEach(() => {
   getLinkByDiscordId.mockReset();
   getUserDashboard.mockReset();
   buildReloginPrompt.mockClear();
-  loadMappings.mockReset();
-  loadMappings.mockReturnValue({ rules: [], managedRoleIds: new Set<string>() });
 });
 
 afterEach(() => {
@@ -272,20 +255,6 @@ describe('/credentials execute', () => {
     expect(buildReloginPrompt).not.toHaveBeenCalled();
   });
 
-  it('loadMappings throwing degrades to no earn-hints, embed still renders', async () => {
-    vi.spyOn(console, 'error').mockImplementation(() => {});
-    getLinkByDiscordId.mockReturnValue(linkedJwt('alice'));
-    getUserDashboard.mockResolvedValue({ partial: false, state: state() });
-    loadMappings.mockImplementation(() => {
-      throw new Error('bad role-mappings.json');
-    });
-    const interaction = makeInteraction();
-
-    await execute(interaction as never);
-
-    const payload = interaction.reply.mock.calls[0][0];
-    expect(payload.embeds).toHaveLength(1);
-  });
 });
 
 // --- renderCredentialsEmbed (display names) --------------------------------
@@ -308,79 +277,13 @@ describe('renderCredentialsEmbed', () => {
     expect(completed.value).toContain('Cardano 101');
     expect(completed.value).not.toContain('course_abc');
   });
-});
 
-// --- renderCredentialsEmbed (earn-it hints) --------------------------------
-
-describe('renderCredentialsEmbed — earn-it hints', () => {
-  const devRule: MappingRule = {
-    type: 'credential',
-    course_id: 'c1',
-    slt_hash: 's1',
-    role_id: 'r1',
-    label: 'Andamio Developer',
-    earn_url: 'https://app.andamio.io/earn',
-  };
-
-  const earnMore = (embed: { fields: { name: string; value: string }[] }) =>
-    embed.fields.find((f) => f.name === 'Earn more');
-
-  it('shows an Earn more hint for a credential the member does NOT hold', () => {
-    const embed = renderCredentialsEmbed(state(), {}, mappingsOf([devRule])).toJSON();
-    const field = earnMore(embed as never);
-    expect(field?.value).toContain('Andamio Developer');
-    expect(field?.value).toContain('https://app.andamio.io/earn');
-  });
-
-  it('does NOT show the hint once the member holds the credential', () => {
+  it('no longer renders an Earn more field (moved to /available + /check)', () => {
     const embed = renderCredentialsEmbed(
-      state({ completedCourses: [{ courseId: 'c1', claimedCredentials: ['s1'] }] }),
-      {},
-      mappingsOf([devRule]),
+      state({ completedCourses: [{ courseId: 'c1', claimedCredentials: [] }] }),
     ).toJSON();
-    expect(earnMore(embed as never)).toBeUndefined();
-  });
-
-  it('falls back to the course display name when a rule has no label', () => {
-    const noLabel: MappingRule = { ...devRule };
-    delete noLabel.label;
-    const embed = renderCredentialsEmbed(
-      state(),
-      { c1: 'Cardano 101' },
-      mappingsOf([noLabel]),
-    ).toJSON();
-    expect(earnMore(embed as never)?.value).toContain('Cardano 101');
-  });
-
-  it('de-dupes by earn_url across rules', () => {
-    const embed = renderCredentialsEmbed(
-      state(),
-      {},
-      mappingsOf([devRule, { ...devRule, role_id: 'r2', label: 'Also Dev' }]),
-    ).toJSON();
-    const lines = earnMore(embed as never)?.value.split('\n') ?? [];
-    expect(lines).toHaveLength(1);
-  });
-
-  it('shows no hint for rules without an earn_url', () => {
-    const embed = renderCredentialsEmbed(
-      state(),
-      {},
-      mappingsOf([{ type: 'enrolled', course_id: 'c1', role_id: 'r1' }]),
-    ).toJSON();
-    expect(earnMore(embed as never)).toBeUndefined();
-  });
-
-  it('end-to-end: a connected non-holder gets the Earn more field via execute()', async () => {
-    getLinkByDiscordId.mockReturnValue(linkedJwt('alice'));
-    getUserDashboard.mockResolvedValue({ partial: false, state: state() });
-    loadMappings.mockReturnValue(mappingsOf([devRule]));
-    const interaction = makeInteraction();
-
-    await execute(interaction as never);
-
-    const embed = interaction.reply.mock.calls[0][0].embeds[0].toJSON();
-    const field = embed.fields.find((f: { name: string }) => f.name === 'Earn more');
-    expect(field.value).toContain('https://app.andamio.io/earn');
+    expect(
+      embed.fields.find((f: { name: string }) => f.name === 'Earn more'),
+    ).toBeUndefined();
   });
 });
