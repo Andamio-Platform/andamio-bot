@@ -26,8 +26,11 @@ export interface Config {
   dbPath: string;
 }
 
-/** Env vars that must be present and non-empty. */
-const REQUIRED_VARS = [
+/**
+ * Env vars that must be present and non-empty. Exported so the env `doctor`
+ * (src/doctor.ts) checks exactly the same set the boot path requires.
+ */
+export const REQUIRED_VARS = [
   'DISCORD_TOKEN',
   'DISCORD_APP_ID',
   'GUILD_ID',
@@ -40,26 +43,46 @@ const REQUIRED_VARS = [
 ] as const;
 
 /** Env vars that must parse as valid http(s) URLs. */
-const URL_VARS = [
+export const URL_VARS = [
   'ANDAMIO_API_BASE_URL',
   'APP_LOGIN_BASE_URL',
   'BOT_CALLBACK_BASE_URL',
 ] as const;
 
-function assertValidUrl(name: string, value: string): void {
+// --- Granular, non-throwing validators -------------------------------------
+// `loadConfig` is fail-fast (throws on the first problem); the doctor needs to
+// collect ALL problems at once. Both call these shared predicates so the doctor
+// and the boot path can never diverge on what "valid" means.
+
+/** True when an env value is present and non-empty (after trimming). */
+export function isPresent(value: string | undefined): value is string {
+  return value !== undefined && value.trim() !== '';
+}
+
+/**
+ * Validate a URL value WITHOUT throwing: returns `null` when it is a valid
+ * http(s) URL, otherwise a short human-readable reason (no value echoed).
+ */
+export function urlProblem(value: string): string | null {
   let parsed: URL;
   try {
     parsed = new URL(value);
   } catch {
-    throw new Error(`Invalid URL for ${name}: "${value}" is not a valid URL`);
+    return 'is not a valid URL';
   }
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-    throw new Error(`Invalid URL for ${name}: "${value}" must use http or https`);
+    return 'must use http or https';
   }
+  return null;
+}
+
+/** True when a value ends with a trailing slash (base URLs must not). */
+export function hasTrailingSlash(value: string): boolean {
+  return value.endsWith('/');
 }
 
 /** Strip a single trailing slash so base URLs concatenate predictably. */
-function stripTrailingSlash(value: string): string {
+export function stripTrailingSlash(value: string): string {
   return value.endsWith('/') ? value.slice(0, -1) : value;
 }
 
@@ -69,14 +92,17 @@ function stripTrailingSlash(value: string): string {
  */
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   for (const name of REQUIRED_VARS) {
-    const value = env[name];
-    if (value === undefined || value.trim() === '') {
+    if (!isPresent(env[name])) {
       throw new Error(`Missing required environment variable: ${name}`);
     }
   }
 
   for (const name of URL_VARS) {
-    assertValidUrl(name, env[name] as string);
+    const value = env[name] as string;
+    const problem = urlProblem(value);
+    if (problem) {
+      throw new Error(`Invalid URL for ${name}: "${value}" ${problem}`);
+    }
   }
 
   return {
