@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { gatedCredentials } from './gating-view';
+import { earnSuffix, gatedCredentials } from './gating-view';
 import type { UserState } from '../andamio/dashboard-client';
 import type { Mappings, MappingRule } from '../gating/mappings';
 
@@ -24,6 +24,20 @@ const issuerRule: MappingRule = {
   label: 'Andamio Issuer',
   earn_url: 'https://app.andamio.io/earn',
 };
+
+describe('earnSuffix', () => {
+  it('returns the " — earn it: <url>" suffix when a url is present', () => {
+    expect(earnSuffix('https://app.andamio.io/earn')).toBe(
+      ' — earn it: https://app.andamio.io/earn',
+    );
+  });
+
+  it('returns an empty string for a missing or empty url', () => {
+    expect(earnSuffix()).toBe('');
+    expect(earnSuffix(undefined)).toBe('');
+    expect(earnSuffix('')).toBe('');
+  });
+});
 
 describe('gatedCredentials', () => {
   it('labels via rule.label, falling back to the course display name', () => {

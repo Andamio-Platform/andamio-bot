@@ -21,7 +21,8 @@ import {
 } from '../andamio/course-names';
 import { loadMappings, type Mappings } from '../gating/mappings';
 import { gateMemberFromState } from '../gating/triggers';
-import { gatedCredentials } from './gating-view';
+import { earnSuffix, gatedCredentials } from './gating-view';
+import { fitFieldValue } from './embed-field';
 
 export const data = new SlashCommandBuilder()
   .setName('check')
@@ -68,18 +69,15 @@ export function renderCheckEmbed(
   if (held.length > 0) {
     embed.addFields({
       name: 'You have',
-      value: held.map((c) => `✅ **${c.label}**`).join('\n'),
+      value: fitFieldValue(held.map((c) => `✅ **${c.label}**`)),
     });
   }
   if (missing.length > 0) {
     embed.addFields({
       name: 'Not yet',
-      value: missing
-        .map((c) => {
-          const earn = c.earnUrl ? ` — earn it: ${c.earnUrl}` : '';
-          return `⬜ **${c.label}**${earn}`;
-        })
-        .join('\n'),
+      value: fitFieldValue(
+        missing.map((c) => `⬜ **${c.label}**${earnSuffix(c.earnUrl)}`),
+      ),
     });
   }
 
