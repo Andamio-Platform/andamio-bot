@@ -64,16 +64,27 @@ export function desiredRoles(state: UserState, mappings: Mappings): Set<string> 
 /**
  * Diff a member's desired managed roles against the roles they currently hold.
  *
+ * A moderator deny-list overrides the credential grant: any role in
+ * `deniedRoles` is dropped from the desired set BEFORE the diff, so a denied
+ * role is never added and is actively removed if currently held. The deny set is
+ * passed IN to keep this function pure — the database read lives in
+ * `triggers.ts`, which already holds the db handle. Because the subtraction
+ * feeds the existing diff, the block re-asserts on every sweep for free.
+ *
  * @param state         the member's Andamio state (from the dashboard API).
  * @param currentRoles  every role id the member currently has (managed + not).
  * @param mappings      the loaded role mappings (defines the managed set).
+ * @param deniedRoles   concrete role ids to withhold (from the deny-list);
+ *                      defaults to none.
  */
 export function evaluate(
   state: UserState,
   currentRoles: Iterable<string>,
   mappings: Mappings,
+  deniedRoles: ReadonlySet<string> = new Set(),
 ): RoleDiff {
   const desired = desiredRoles(state, mappings);
+  for (const roleId of deniedRoles) desired.delete(roleId);
   const current = new Set(currentRoles);
   const managed = mappings.managedRoleIds;
 

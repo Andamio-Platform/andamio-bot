@@ -14,6 +14,11 @@ vi.mock('../db/links', () => ({
   getAllLinks: () => getAllLinks(),
 }));
 
+const getDeniedRoleIds = vi.fn(() => new Set<string>());
+vi.mock('../db/denials', () => ({
+  getDeniedRoleIds: (...a: unknown[]) => getDeniedRoleIds(...a),
+}));
+
 const getUserDashboard = vi.fn();
 vi.mock('../andamio/dashboard-client', async (importOriginal) => {
   const actual =
@@ -27,6 +32,7 @@ vi.mock('../andamio/dashboard-client', async (importOriginal) => {
 import {
   reevaluateMember,
   reevaluateAll,
+  gateMemberFromState,
   initGating,
   resetGating,
 } from './triggers';
@@ -95,6 +101,7 @@ beforeEach(() => {
   getLinkByDiscordId.mockReset();
   getAllLinks.mockReset().mockReturnValue([]);
   getUserDashboard.mockReset();
+  getDeniedRoleIds.mockReset().mockReturnValue(new Set());
 });
 
 afterEach(() => {
@@ -258,6 +265,70 @@ describe('reevaluateMember (dashboard model)', () => {
   it('not initialised → safe no-op (skipped)', async () => {
     resetGating();
     await expect(reevaluateMember('d1')).resolves.toBe('skipped');
+  });
+});
+
+// --- deny-list (R1, R5) -----------------------------------------------------
+
+describe('reevaluateMember with a deny-list (R1)', () => {
+  it('denied role is removed even though the member holds the credential', async () => {
+    const member = wire(makeMember(['r1']));
+    getLinkByDiscordId.mockReturnValue(validLink());
+    getUserDashboard.mockResolvedValue({
+      partial: false,
+      state: state({ completedCourses: [{ courseId: 'c1', claimedCredentials: ['s1'] }] }),
+    });
+    getDeniedRoleIds.mockReturnValue(new Set(['r1']));
+
+    await reevaluateMember('d1');
+
+    expect(member!.roles.remove).toHaveBeenCalledWith('r1', expect.any(String));
+    expect(member!.roles.add).not.toHaveBeenCalled();
+  });
+
+  it('survives across two sweep ticks — the role is withheld each time', async () => {
+    const member = wire(makeMember(['r1']));
+    getLinkByDiscordId.mockReturnValue(validLink());
+    getUserDashboard.mockResolvedValue({
+      partial: false,
+      state: state({ completedCourses: [{ courseId: 'c1', claimedCredentials: ['s1'] }] }),
+    });
+    getDeniedRoleIds.mockReturnValue(new Set(['r1']));
+
+    await reevaluateMember('d1'); // tick 1
+    await reevaluateMember('d1'); // tick 2
+
+    expect(member!.roles.remove).toHaveBeenCalledTimes(2);
+    expect(member!.roles.add).not.toHaveBeenCalled();
+  });
+
+  it('lifting the denial → the earned role is added back (supports R2)', async () => {
+    const member = wire(makeMember([])); // role already dropped
+    getLinkByDiscordId.mockReturnValue(validLink());
+    getUserDashboard.mockResolvedValue({
+      partial: false,
+      state: state({ completedCourses: [{ courseId: 'c1', claimedCredentials: ['s1'] }] }),
+    });
+    getDeniedRoleIds.mockReturnValue(new Set()); // denial lifted
+
+    await reevaluateMember('d1');
+
+    expect(member!.roles.add).toHaveBeenCalledWith('r1', expect.any(String));
+  });
+});
+
+describe('gateMemberFromState with a deny-list (R5)', () => {
+  it('a denied member cannot /check their way back into the role', async () => {
+    const member = wire(makeMember(['r1']));
+    getDeniedRoleIds.mockReturnValue(new Set(['r1']));
+
+    await gateMemberFromState(
+      'd1',
+      state({ completedCourses: [{ courseId: 'c1', claimedCredentials: ['s1'] }] }),
+    );
+
+    expect(member!.roles.remove).toHaveBeenCalledWith('r1', expect.any(String));
+    expect(member!.roles.add).not.toHaveBeenCalled();
   });
 });
 
