@@ -97,6 +97,23 @@ describe('renderFaqEmbed', () => {
     expect(v).not.toContain('⬜');
   });
 
+  it('credential without an earn_url → bare bullet, no "earn it" and no "undefined"', () => {
+    const noLink: MappingRule = {
+      type: 'credential',
+      course_id: 'c2',
+      slt_hash: 's2',
+      role_id: 'r2',
+      label: 'No Link Cred',
+    };
+    const v = fieldVal(
+      renderFaqEmbed(mappingsOf([noLink])).toJSON(),
+      'What this server unlocks',
+    );
+    expect(v).toContain('• **No Link Cred**');
+    expect(v).not.toContain('earn it');
+    expect(v).not.toContain('undefined');
+  });
+
   it('mappings with zero rules → no unlock list', () => {
     const embed = renderFaqEmbed(mappingsOf([])).toJSON();
     expect(fieldNames(embed)).not.toContain('What this server unlocks');
