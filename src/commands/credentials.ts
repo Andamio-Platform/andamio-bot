@@ -22,6 +22,7 @@ import {
   isDisplayed,
   type DisplayFilter,
 } from '../andamio/course-names';
+import { fitFieldValue } from './embed-field';
 
 export const data = new SlashCommandBuilder()
   .setName('credentials')
@@ -56,7 +57,7 @@ export function renderCredentialsEmbed(
       const n = c.claimedCredentials.length;
       return `• **${name}** — ${n} credential${n === 1 ? '' : 's'}`;
     });
-    embed.addFields({ name: 'Completed', value: lines.join('\n') });
+    embed.addFields({ name: 'Completed', value: fitFieldValue(lines) });
   } else {
     embed.addFields({
       name: 'Completed',
@@ -71,7 +72,7 @@ export function renderCredentialsEmbed(
     .filter((id) => isDisplayed(id, filter));
   if (inProgress.length > 0) {
     const lines = inProgress.map((id) => `• ${displayNameFor(id, names)}`);
-    embed.addFields({ name: 'Enrolled (in progress)', value: lines.join('\n') });
+    embed.addFields({ name: 'Enrolled (in progress)', value: fitFieldValue(lines) });
   }
 
   return embed;

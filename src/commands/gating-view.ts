@@ -12,6 +12,17 @@ import { ruleSatisfied } from '../gating/evaluator';
 import type { Mappings, MappingRule } from '../gating/mappings';
 import type { UserState } from '../andamio/dashboard-client';
 
+/**
+ * The trailing " — earn it: <url>" suffix shown after a credential the member
+ * lacks. Returns `''` when there is no earn link. Centralized here (the module
+ * that owns `GatedCredential`) so `/available`, `/check`, and `/faq` render the
+ * earn link identically and cannot drift. The caller still decides *whether* to
+ * show it (e.g. only for unheld credentials).
+ */
+export function earnSuffix(earnUrl?: string): string {
+  return earnUrl ? ` — earn it: ${earnUrl}` : '';
+}
+
 /** One gated credential, resolved for display. */
 export interface GatedCredential {
   /** Human label: the rule's `label`, else the course display name, else the id. */

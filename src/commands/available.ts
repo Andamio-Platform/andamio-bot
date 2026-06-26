@@ -18,7 +18,8 @@ import {
   type CourseDisplayNames,
 } from '../andamio/course-names';
 import { loadMappings, type Mappings } from '../gating/mappings';
-import { gatedCredentials } from './gating-view';
+import { earnSuffix, gatedCredentials } from './gating-view';
+import { fitFieldValue } from './embed-field';
 
 export const data = new SlashCommandBuilder()
   .setName('available')
@@ -52,7 +53,7 @@ export function renderAvailableEmbed(
   const showStatus = state !== undefined;
   const lines = creds.map((c) => {
     const mark = showStatus ? (c.satisfied ? '✅' : '⬜') : '•';
-    const earn = !c.satisfied && c.earnUrl ? ` — earn it: ${c.earnUrl}` : '';
+    const earn = !c.satisfied ? earnSuffix(c.earnUrl) : '';
     return `${mark} **${c.label}**${earn}`;
   });
 
@@ -69,7 +70,7 @@ export function renderAvailableEmbed(
     );
   }
 
-  embed.addFields({ name: 'Gated credentials', value: lines.join('\n') });
+  embed.addFields({ name: 'Gated credentials', value: fitFieldValue(lines) });
   return embed;
 }
 
