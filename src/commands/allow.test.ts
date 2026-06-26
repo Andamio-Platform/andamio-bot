@@ -11,7 +11,9 @@ vi.mock('../config', () => ({
 const getDb = vi.fn(() => ({}) as unknown);
 vi.mock('../db/handle', () => ({ getDb: () => getDb() }));
 
-const reevaluateMember = vi.fn().mockResolvedValue('updated');
+const reevaluateMember = vi
+  .fn()
+  .mockResolvedValue({ status: 'updated', failed: [] });
 vi.mock('../gating/triggers', () => ({
   reevaluateMember: (...a: unknown[]) => reevaluateMember(...a),
 }));
@@ -38,7 +40,7 @@ interface FakeInteraction {
   memberPermissions: { has: () => boolean };
   member: { roles: { cache: Set<string> } };
   options: {
-    getUser: () => { id: string };
+    getUser: () => { id: string; username: string };
     getRole: () => { id: string; name: string } | null;
   };
   reply: Mock;
@@ -54,7 +56,7 @@ function makeInteraction(opts: {
     memberPermissions: { has: () => opts.manageRoles ?? true },
     member: { roles: { cache: new Set() } },
     options: {
-      getUser: () => ({ id: opts.target ?? 'target-1' }),
+      getUser: () => ({ id: opts.target ?? 'target-1', username: 'targetuser' }),
       getRole: () => opts.role ?? null,
     },
     reply: vi.fn().mockResolvedValue(undefined),
@@ -119,5 +121,38 @@ describe('/allow', () => {
     expect(i.reply.mock.calls[0][0].content).toMatch(/no active moderator blocks/i);
     expect(deleteDenial).not.toHaveBeenCalled();
     expect(reevaluateMember).not.toHaveBeenCalled();
+  });
+
+  it('role X but member only has a FULL_BLOCK → no false success, points to full unblock', async () => {
+    listDenials.mockReturnValue([aDenial({ role_id: '*' })]);
+    const i = makeInteraction({ role: { id: 'r1', name: 'Issuer' } });
+
+    await execute(i as never);
+
+    expect(deleteDenial).not.toHaveBeenCalled();
+    expect(reevaluateMember).not.toHaveBeenCalled();
+    expect(i.reply.mock.calls[0][0].content).toMatch(/full block/i);
+  });
+
+  it('role X but member is denied a DIFFERENT role → no false success', async () => {
+    listDenials.mockReturnValue([aDenial({ role_id: 'r2' })]);
+    const i = makeInteraction({ role: { id: 'r1', name: 'Issuer' } });
+
+    await execute(i as never);
+
+    expect(deleteDenial).not.toHaveBeenCalled();
+    expect(reevaluateMember).not.toHaveBeenCalled();
+    expect(i.reply.mock.calls[0][0].content).toMatch(/no block on/i);
+  });
+
+  it('role X with a matching denial → deletes it and confirms', async () => {
+    listDenials.mockReturnValue([aDenial({ role_id: 'r1' })]);
+    const i = makeInteraction({ role: { id: 'r1', name: 'Issuer' } });
+
+    await execute(i as never);
+
+    expect(deleteDenial).toHaveBeenCalledWith({}, 'target-1', 'r1');
+    expect(reevaluateMember).toHaveBeenCalledWith('target-1');
+    expect(i.reply.mock.calls[0][0].content).toMatch(/lifted the block/i);
   });
 });

@@ -164,8 +164,12 @@ describe('reevaluateMember (dashboard model)', () => {
       state: state({ completedCourses: [{ courseId: 'c1', claimedCredentials: ['s1'] }] }),
     });
 
-    // applyDiff swallows the per-role failure, so the evaluation still completes.
-    await expect(reevaluateMember('d1')).resolves.toBe('updated');
+    // applyDiff swallows the per-role failure so the evaluation still completes,
+    // but now SURFACES the failed role id so an interactive caller can report it.
+    await expect(reevaluateMember('d1')).resolves.toEqual({
+      status: 'updated',
+      failed: ['r1'],
+    });
     expect(member!.roles.add).toHaveBeenCalledWith('r1', expect.any(String));
   });
 
@@ -256,7 +260,7 @@ describe('reevaluateMember (dashboard model)', () => {
     } as never);
     getLinkByDiscordId.mockReturnValue(validLink());
 
-    await expect(reevaluateMember('d1')).resolves.toBe('skipped');
+    await expect(reevaluateMember('d1')).resolves.toMatchObject({ status: 'skipped' });
     expect(getUserDashboard).not.toHaveBeenCalled();
     expect(member.roles.add).not.toHaveBeenCalled();
     expect(member.roles.remove).not.toHaveBeenCalled();
@@ -264,7 +268,7 @@ describe('reevaluateMember (dashboard model)', () => {
 
   it('not initialised → safe no-op (skipped)', async () => {
     resetGating();
-    await expect(reevaluateMember('d1')).resolves.toBe('skipped');
+    await expect(reevaluateMember('d1')).resolves.toMatchObject({ status: 'skipped' });
   });
 });
 
@@ -286,8 +290,11 @@ describe('reevaluateMember with a deny-list (R1)', () => {
     expect(member!.roles.add).not.toHaveBeenCalled();
   });
 
-  it('survives across two sweep ticks — the role is withheld each time', async () => {
-    const member = wire(makeMember(['r1']));
+  it('survives the tick AFTER removal: an absent denied role is never re-granted', async () => {
+    // Models the real state change between ticks: tick 1 removes the role (member
+    // held it); tick 2 sees the member NO LONGER holding it. The credential is
+    // still satisfied, so without the deny subtraction tick 2 would re-ADD r1.
+    // The denial must keep it out via the add-path, not just the remove-path.
     getLinkByDiscordId.mockReturnValue(validLink());
     getUserDashboard.mockResolvedValue({
       partial: false,
@@ -295,11 +302,31 @@ describe('reevaluateMember with a deny-list (R1)', () => {
     });
     getDeniedRoleIds.mockReturnValue(new Set(['r1']));
 
-    await reevaluateMember('d1'); // tick 1
-    await reevaluateMember('d1'); // tick 2
+    const tick1 = wire(makeMember(['r1'])); // holds r1
+    await reevaluateMember('d1');
+    expect(tick1!.roles.remove).toHaveBeenCalledWith('r1', expect.any(String));
 
-    expect(member!.roles.remove).toHaveBeenCalledTimes(2);
-    expect(member!.roles.add).not.toHaveBeenCalled();
+    const tick2 = wire(makeMember([])); // role already gone
+    await reevaluateMember('d1');
+    expect(tick2!.roles.add).not.toHaveBeenCalled();
+    expect(tick2!.roles.remove).not.toHaveBeenCalled();
+  });
+
+  it('surfaces a failed role removal (e.g. role above the bot) in the outcome', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const member = wire(makeMember(['r1']));
+    member!.roles.remove = vi.fn().mockRejectedValue(new Error('Missing Permissions'));
+    getLinkByDiscordId.mockReturnValue(validLink());
+    getUserDashboard.mockResolvedValue({
+      partial: false,
+      state: state({ completedCourses: [{ courseId: 'c1', claimedCredentials: ['s1'] }] }),
+    });
+    getDeniedRoleIds.mockReturnValue(new Set(['r1']));
+
+    await expect(reevaluateMember('d1')).resolves.toEqual({
+      status: 'updated',
+      failed: ['r1'],
+    });
   });
 
   it('lifting the denial → the earned role is added back (supports R2)', async () => {
