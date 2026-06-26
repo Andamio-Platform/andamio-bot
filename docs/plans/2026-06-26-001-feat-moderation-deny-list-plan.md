@@ -1,6 +1,6 @@
 ---
 type: plan
-status: active
+status: completed
 created: 2026-06-26
 origin: docs/plans/2026-06-26-andamio-bot-launch-features-handoff.md (external handoff; Build 2)
 target_repo: andamio-bot
