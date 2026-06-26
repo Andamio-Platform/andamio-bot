@@ -18,7 +18,9 @@ vi.mock('../gating/mappings', async (io) => {
   return { ...actual, loadMappings: () => loadMappings() };
 });
 
-const reevaluateMember = vi.fn().mockResolvedValue('updated');
+const reevaluateMember = vi
+  .fn()
+  .mockResolvedValue({ status: 'updated', failed: [] });
 vi.mock('../gating/triggers', () => ({
   reevaluateMember: (...a: unknown[]) => reevaluateMember(...a),
 }));
@@ -72,7 +74,7 @@ const mappings = (): Mappings => ({
 
 beforeEach(() => {
   upsertDenial.mockReset();
-  reevaluateMember.mockReset().mockResolvedValue('updated');
+  reevaluateMember.mockReset().mockResolvedValue({ status: 'updated', failed: [] });
   loadMappings.mockReset().mockReturnValue(mappings());
 });
 
@@ -105,7 +107,33 @@ describe('/deny', () => {
 
     expect(upsertDenial).toHaveBeenCalledWith({}, 'target-1', 'r1', 'spam', 'mod-1');
     expect(reevaluateMember).toHaveBeenCalledWith('target-1');
-    expect(i.reply.mock.calls[0][0].flags).toBe(MessageFlags.Ephemeral);
+    const payload = i.reply.mock.calls[0][0];
+    expect(payload.flags).toBe(MessageFlags.Ephemeral);
+    expect(payload.content).toMatch(/live now/i);
+  });
+
+  it('member not reachable (skipped) → reports recorded-not-yet-applied, not success', async () => {
+    reevaluateMember.mockResolvedValue({ status: 'skipped', failed: [] });
+    const i = makeInteraction({ role: { id: 'r1', name: 'Issuer' } });
+
+    await execute(i as never);
+
+    // Denial still written; message must NOT claim the block is live.
+    expect(upsertDenial).toHaveBeenCalled();
+    const content = i.reply.mock.calls[0][0].content;
+    expect(content).toMatch(/next time they log in|aren’t connected/i);
+    expect(content).not.toMatch(/live now/i);
+  });
+
+  it('role above the bot (remove failed) → warns the role could not be removed', async () => {
+    reevaluateMember.mockResolvedValue({ status: 'updated', failed: ['r1'] });
+    const i = makeInteraction({ role: { id: 'r1', name: 'Issuer' } });
+
+    await execute(i as never);
+
+    const content = i.reply.mock.calls[0][0].content;
+    expect(content).toMatch(/could not remove|above my own role/i);
+    expect(content).not.toMatch(/live now/i);
   });
 
   it('no role → writes a FULL_BLOCK denial (R8)', async () => {

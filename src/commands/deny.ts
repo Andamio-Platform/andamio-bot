@@ -72,15 +72,41 @@ export async function execute(
     roleId = FULL_BLOCK;
   }
 
-  upsertDenial(getDb(), target.id, roleId, reason, interaction.user.id);
-  await reevaluateMember(target.id);
+  const db = getDb();
+  upsertDenial(db, target.id, roleId, reason, interaction.user.id);
+  const outcome = await reevaluateMember(target.id);
 
   const scope = role ? `<@&${role.id}>` : '**all gated roles**';
   const reasonLine = reason ? `\nReason: ${reason}` : '';
+
+  // Report what actually happened, not an assumed success. The denial row is
+  // always written; whether the live role dropped depends on the member's state.
+  const removeFailed = role
+    ? outcome.failed.includes(role.id)
+    : outcome.failed.length > 0;
+
+  let lead: string;
+  if (outcome.status === 'skipped') {
+    lead =
+      `Recorded a block on <@${target.id}> for ${scope}. They aren’t connected ` +
+      'right now, so it will apply automatically the next time they log in.';
+  } else if (outcome.status === 'failed') {
+    lead =
+      `Recorded a block on <@${target.id}> for ${scope}. I couldn’t re-check ` +
+      'their roles just now — it will be enforced on the next sweep.';
+  } else if (removeFailed) {
+    lead =
+      `Recorded a block on <@${target.id}> for ${scope}, but I could not remove ` +
+      'the role — it likely sits above my own role in Server Settings → Roles. ' +
+      'Move my role above it, then run `/check` on the member.';
+  } else {
+    lead =
+      `Denied <@${target.id}> from ${scope}. The block is live now and holds ` +
+      'through every sweep until you `/allow` it.';
+  }
+
   await interaction.reply({
-    content:
-      `Denied <@${target.id}> from ${scope}. Their roles were re-checked just ` +
-      `now, and the block holds through every sweep until you \`/allow\` it.${reasonLine}`,
+    content: `${lead}${reasonLine}`,
     flags: MessageFlags.Ephemeral,
   });
 }

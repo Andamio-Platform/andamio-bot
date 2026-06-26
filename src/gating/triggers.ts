@@ -106,13 +106,20 @@ async function fetchMember(
  * single failing add/remove (e.g. a managed role positioned above the bot's
  * own role, or a transient Discord error) is logged and skipped so it cannot
  * abort the rest of the diff or leave gating wedged on one bad role.
+ *
+ * Returns the role ids whose op FAILED, so an interactive caller (e.g. `/deny`)
+ * can tell a moderator the block did not actually land — a role positioned
+ * above the bot can never be removed, and silently reporting success would be a
+ * lie. Fire-and-forget callers ignore the return.
  */
-async function applyDiff(member: GuildMember, diff: RoleDiff): Promise<void> {
+async function applyDiff(member: GuildMember, diff: RoleDiff): Promise<string[]> {
+  const failed: string[] = [];
   for (const roleId of diff.add) {
     try {
       await member.roles.add(roleId, 'Andamio gating: credential satisfied');
     } catch (err) {
       console.error(`Gating: failed to add role ${roleId} to ${member.id}:`, err);
+      failed.push(roleId);
     }
   }
   for (const roleId of diff.remove) {
@@ -126,12 +133,27 @@ async function applyDiff(member: GuildMember, diff: RoleDiff): Promise<void> {
         `Gating: failed to remove role ${roleId} from ${member.id}:`,
         err,
       );
+      failed.push(roleId);
     }
   }
+  return failed;
 }
 
-/** Outcome of a re-evaluation, so interactive callers can report honestly. */
+/** Coarse status of a re-evaluation. */
 export type ReevaluationResult = 'updated' | 'skipped' | 'failed';
+
+/**
+ * Full outcome of a re-evaluation. `status` is the coarse result; `failed` lists
+ * managed-role ids whose Discord apply op failed (e.g. positioned above the bot)
+ * so an interactive caller can report honestly instead of assuming success.
+ */
+export interface ReevaluationOutcome {
+  status: ReevaluationResult;
+  failed: string[];
+}
+
+const skipped: ReevaluationOutcome = { status: 'skipped', failed: [] };
+const failedOutcome: ReevaluationOutcome = { status: 'failed', failed: [] };
 
 /**
  * Re-evaluate one member's managed roles against their Andamio state and apply
@@ -154,33 +176,33 @@ export type ReevaluationResult = 'updated' | 'skipped' | 'failed';
  *     key / revoked token), or any transient error leaves roles unchanged, so a
  *     blip in the API never strips the whole guild's gated roles.
  *
- * Returns the outcome (`updated` | `skipped` | `failed`) so an interactive
- * caller (`/refresh`) can report honestly. Still never throws — fire-and-forget
- * callers may ignore the result.
+ * Returns the {@link ReevaluationOutcome} (status + any roles whose Discord apply
+ * failed) so an interactive caller can report honestly. Still never throws —
+ * fire-and-forget callers may ignore the result.
  */
 export async function reevaluateMember(
   discordId: string,
-): Promise<ReevaluationResult> {
-  if (!deps) return 'skipped'; // Not initialised (e.g. in unit tests).
+): Promise<ReevaluationOutcome> {
+  if (!deps) return skipped; // Not initialised (e.g. in unit tests).
   const d = deps;
 
   try {
     const member = await fetchMember(d, discordId);
-    if (!member) return 'skipped';
+    if (!member) return skipped;
 
     const currentRoles = member.roles.cache.map((r) => r.id);
     const link = getLinkByDiscordId(getDb(), discordId);
 
     // Unconnected: ensure NO managed roles (remove any present, add none).
     if (!link) {
-      await applyDiff(member, unconnectedDiff(currentRoles, d.mappings));
-      return 'updated';
+      const failed = await applyDiff(member, unconnectedDiff(currentRoles, d.mappings));
+      return { status: 'updated', failed };
     }
 
     // Connected but no usable JWT → cannot read state unattended; leave roles
     // as-is (re-gates on next interactive /login or /refresh).
     if (!link.user_jwt || isExpired(link.jwt_expires_at)) {
-      return 'skipped';
+      return skipped;
     }
 
     let result;
@@ -207,7 +229,7 @@ export async function reevaluateMember(
           err,
         );
       }
-      return 'failed';
+      return failedOutcome;
     }
 
     // Degraded (partial) data must not drive role REMOVAL — skip rather than
@@ -217,21 +239,21 @@ export async function reevaluateMember(
         `Gating: partial (206) dashboard for "${link.alias}" (${discordId}) — ` +
           `skipping to avoid churning roles on incomplete data.`,
       );
-      return 'skipped';
+      return skipped;
     }
 
     // Subtract any moderator deny-list entries: the db read lives here (we hold
     // the handle), the evaluator stays pure. Re-read every call so a denial
     // added between sweeps takes effect on the very next tick.
     const denied = getDeniedRoleIds(getDb(), discordId, d.mappings.managedRoleIds);
-    await applyDiff(
+    const failed = await applyDiff(
       member,
       evaluate(result.state, currentRoles, d.mappings, denied),
     );
-    return 'updated';
+    return { status: 'updated', failed };
   } catch (err) {
     console.error(`Gating: reevaluateMember failed for ${discordId}:`, err);
-    return 'failed';
+    return failedOutcome;
   }
 }
 
@@ -250,21 +272,24 @@ export async function reevaluateMember(
 export async function gateMemberFromState(
   discordId: string,
   state: UserState,
-): Promise<ReevaluationResult> {
-  if (!deps) return 'skipped';
+): Promise<ReevaluationOutcome> {
+  if (!deps) return skipped;
   const d = deps;
   try {
     const member = await fetchMember(d, discordId);
-    if (!member) return 'skipped';
+    if (!member) return skipped;
     const currentRoles = member.roles.cache.map((r) => r.id);
     // Same deny-list subtraction as the sweep, so a member cannot `/check`
     // their way back into a denied role.
     const denied = getDeniedRoleIds(getDb(), discordId, d.mappings.managedRoleIds);
-    await applyDiff(member, evaluate(state, currentRoles, d.mappings, denied));
-    return 'updated';
+    const failed = await applyDiff(
+      member,
+      evaluate(state, currentRoles, d.mappings, denied),
+    );
+    return { status: 'updated', failed };
   } catch (err) {
     console.error(`Gating: gateMemberFromState failed for ${discordId}:`, err);
-    return 'failed';
+    return failedOutcome;
   }
 }
 

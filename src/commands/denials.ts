@@ -50,8 +50,9 @@ export async function execute(
   const config = loadConfig();
   if (!(await requireModerator(interaction, config.modRoleId))) return;
 
+  const db = getDb();
   const target = interaction.options.getUser('member');
-  const denials = listDenials(getDb(), target?.id);
+  const denials = listDenials(db, target?.id);
 
   await interaction.reply({
     embeds: [renderDenialsEmbed(denials)],
