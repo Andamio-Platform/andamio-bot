@@ -26,6 +26,15 @@ export function migrate(db: Db): void {
       discord_id TEXT NOT NULL,
       created_at INTEGER
     );
+
+    CREATE TABLE IF NOT EXISTS denials (
+      discord_id TEXT NOT NULL,
+      role_id    TEXT NOT NULL,
+      reason     TEXT,
+      created_by TEXT NOT NULL,
+      created_at INTEGER,
+      PRIMARY KEY (discord_id, role_id)
+    );
   `);
 
   // Upgrade databases created before the JWT columns existed. Additive and
