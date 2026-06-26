@@ -30,6 +30,19 @@ describe('loadConfig', () => {
     expect(config.dbPath).toBe('./data/bot.sqlite');
   });
 
+  it('MOD_ROLE_ID is optional: undefined when unset, value when set', () => {
+    expect(loadConfig(validEnv()).modRoleId).toBeUndefined();
+    const env = validEnv();
+    env.MOD_ROLE_ID = '555000111';
+    expect(loadConfig(env).modRoleId).toBe('555000111');
+  });
+
+  it('MOD_ROLE_ID blank/whitespace → undefined (treated as unset)', () => {
+    const env = validEnv();
+    env.MOD_ROLE_ID = '   ';
+    expect(loadConfig(env).modRoleId).toBeUndefined();
+  });
+
   it('strips a trailing slash from base URLs', () => {
     const env = validEnv();
     env.ANDAMIO_API_BASE_URL = 'https://api.andamio.io/';

@@ -162,3 +162,67 @@ describe('managed-set guard — never touches unmanaged roles', () => {
     }
   });
 });
+
+describe('deny-list subtraction (R1, R4)', () => {
+  // A member who has completed c1 and claimed the target credential earns all
+  // three managed roles.
+  const earnedAll = state({
+    enrolledCourses: ['c1'],
+    completedCourses: [{ courseId: 'c1', claimedCredentials: ['slt-target'] }],
+  });
+
+  it('empty deny set → identical to the no-arg behavior (regression guard)', () => {
+    const withArg = evaluate(earnedAll, [], mappings, new Set());
+    const without = evaluate(earnedAll, [], mappings);
+    expect(withArg).toEqual(without);
+  });
+
+  it('denied role the member does NOT hold is never added', () => {
+    const diff = evaluate(earnedAll, [], mappings, new Set(['role-cred']));
+    expect(diff.add).not.toContain('role-cred');
+    // The other earned roles are still granted.
+    expect(diff.add.sort()).toEqual(['role-complete', 'role-enrolled']);
+  });
+
+  it('denied role the member currently holds is actively removed', () => {
+    const diff = evaluate(
+      earnedAll,
+      ['role-cred'],
+      mappings,
+      new Set(['role-cred']),
+    );
+    expect(diff.remove).toContain('role-cred');
+    expect(diff.add).not.toContain('role-cred');
+  });
+
+  it('full block (all managed roles denied) withholds every earned role, leaves unmanaged alone', () => {
+    const diff = evaluate(
+      earnedAll,
+      ['role-enrolled', 'role-complete', 'role-cred', 'unmanaged-mod'],
+      mappings,
+      mappings.managedRoleIds,
+    );
+    expect(diff.add).toEqual([]);
+    expect(diff.remove.sort()).toEqual([
+      'role-complete',
+      'role-cred',
+      'role-enrolled',
+    ]);
+    expect(diff.remove).not.toContain('unmanaged-mod');
+  });
+
+  it('denying an unmanaged role has no effect on add/remove', () => {
+    const diff = evaluate(
+      earnedAll,
+      ['unmanaged-mod'],
+      mappings,
+      new Set(['unmanaged-mod']),
+    );
+    expect(diff.remove).not.toContain('unmanaged-mod');
+    expect(diff.add.sort()).toEqual([
+      'role-complete',
+      'role-cred',
+      'role-enrolled',
+    ]);
+  });
+});

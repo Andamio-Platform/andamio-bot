@@ -23,6 +23,7 @@ import type { Client, GuildMember } from 'discord.js';
 import type { Config } from '../config';
 import { getDb } from '../db/handle';
 import { getAllLinks, getLinkByDiscordId } from '../db/links';
+import { getDeniedRoleIds } from '../db/denials';
 import {
   getUserDashboard,
   ApiError,
@@ -219,7 +220,14 @@ export async function reevaluateMember(
       return 'skipped';
     }
 
-    await applyDiff(member, evaluate(result.state, currentRoles, d.mappings));
+    // Subtract any moderator deny-list entries: the db read lives here (we hold
+    // the handle), the evaluator stays pure. Re-read every call so a denial
+    // added between sweeps takes effect on the very next tick.
+    const denied = getDeniedRoleIds(getDb(), discordId, d.mappings.managedRoleIds);
+    await applyDiff(
+      member,
+      evaluate(result.state, currentRoles, d.mappings, denied),
+    );
     return 'updated';
   } catch (err) {
     console.error(`Gating: reevaluateMember failed for ${discordId}:`, err);
@@ -249,7 +257,10 @@ export async function gateMemberFromState(
     const member = await fetchMember(d, discordId);
     if (!member) return 'skipped';
     const currentRoles = member.roles.cache.map((r) => r.id);
-    await applyDiff(member, evaluate(state, currentRoles, d.mappings));
+    // Same deny-list subtraction as the sweep, so a member cannot `/check`
+    // their way back into a denied role.
+    const denied = getDeniedRoleIds(getDb(), discordId, d.mappings.managedRoleIds);
+    await applyDiff(member, evaluate(state, currentRoles, d.mappings, denied));
     return 'updated';
   } catch (err) {
     console.error(`Gating: gateMemberFromState failed for ${discordId}:`, err);
