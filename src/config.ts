@@ -24,6 +24,12 @@ export interface Config {
   roleMappingsPath: string;
   /** Path to the SQLite database file. */
   dbPath: string;
+  /**
+   * Optional Discord role id whose holders may run the moderator commands
+   * (`/deny`, `/allow`, `/denials`) in addition to anyone with the native
+   * Manage Roles permission. Unset → Manage Roles is the only gate.
+   */
+  modRoleId: string | undefined;
 }
 
 /**
@@ -115,5 +121,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     botCallbackBaseUrl: stripTrailingSlash(env.BOT_CALLBACK_BASE_URL as string),
     roleMappingsPath: env.ROLE_MAPPINGS_PATH as string,
     dbPath: env.DB_PATH as string,
+    // Optional: absent or blank → undefined (Manage Roles is the only mod gate).
+    modRoleId: isPresent(env.MOD_ROLE_ID) ? env.MOD_ROLE_ID.trim() : undefined,
   };
 }
