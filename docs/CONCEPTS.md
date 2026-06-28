@@ -41,7 +41,7 @@ Every value the bot needs is one of three kinds:
 |---|---|---|
 | **You create** (in Discord) | `DISCORD_TOKEN`, `DISCORD_APP_ID`, `GUILD_ID`, and the **role id(s)** you gate on | You, in the Discord Developer Portal and your server |
 | **Andamio gives you** | `ANDAMIO_API_KEY`, `ANDAMIO_API_BASE_URL`, `APP_LOGIN_BASE_URL`, and each rule's `course_id` + `slt_hash` (and optionally an `earn_url`) | Andamio (ask in the [Andamio Network Discord](https://discord.gg/andamio) if you do not have these yet) |
-| **You choose / your host sets** | `BOT_CALLBACK_BASE_URL` (your bot's public URL, known after you deploy), `ROLE_MAPPINGS_PATH`, `DB_PATH`, `COURSE_DISPLAY_NAMES`, `SHOW_ALL_COURSES`, `PORT` | You, or your hosting platform |
+| **You choose / your host sets** | `BOT_CALLBACK_BASE_URL` (your bot's public URL, known after you deploy), `ROLE_MAPPINGS_PATH`, `DB_PATH`, `COURSE_DISPLAY_NAMES`, `SHOW_ALL_COURSES`, `MOD_ROLE_ID` (optional moderator role for the deny-list commands), `PORT` | You, or your hosting platform |
 
 The hardest part for a new community is getting the Andamio-side values (the API
 key and a credential to gate on). At this stage Andamio provisions those and is

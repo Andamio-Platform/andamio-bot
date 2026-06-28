@@ -40,6 +40,28 @@ Other guides: [deploy anywhere](./docs/DEPLOY.md) ·
 | `/credentials` | Shows the member the Andamio credentials they have earned (ephemeral). Personal inventory only. Curated by `COURSE_DISPLAY_NAMES` (see Curated display below). |
 | `/available` | Lists the credentials this server gates channels on, each marked held or not, with a link to earn the ones they lack. Works before connecting. |
 | `/check` | Re-reads the member's credentials live, updates their roles, and reports which gated credentials they hold and still need. One command to refresh roles and see where you stand. |
+| `/faq` | Shows a get-started guide (connect, see what you hold, check access, browse what unlocks channels), plus a config-built list of what this server gates on. Local-only — renders identically before connecting and when Andamio is down. |
+
+## Moderator commands (deny-list)
+
+Gating only ever **grants** roles a member's credentials earn. These three
+commands let a moderator **withhold** a gated role from a specific member even
+when they hold the credential — and the block **survives every periodic sweep**
+(the sweep recomputes desired roles each tick and subtracts active denials, so a
+manual Discord role removal alone would not stick, but a denial does). Use it to
+block a member from a channel without revoking their credential. Lift it with
+`/allow`.
+
+| Command | What it does |
+|---------|--------------|
+| `/deny <member> [role] [reason]` | Blocks `member` from a gated `role` (omit `role` to block **all** gated roles) even if they hold the credential. The block is recorded immediately and applies on the next login if the member isn't connected. `reason` shows in `/denials`. |
+| `/allow <member> [role]` | Lifts a block. Name a `role` to lift just that one, or omit it to lift **all** blocks on the member. Any role they've earned is then restored. |
+| `/denials [member]` | Lists active blocks (who, which role or "all gated roles", reason, who set it). Omit `member` for the whole server. |
+
+**Who can use them.** A member with Discord's native **Manage Roles** permission,
+or — when `MOD_ROLE_ID` is set — anyone holding that role. The check is enforced
+server-side inside each command, not via Discord's command-visibility defaults
+alone. `MOD_ROLE_ID` is optional; absent means "Manage Roles only."
 
 ## How it works
 
