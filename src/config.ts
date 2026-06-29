@@ -22,6 +22,12 @@ export interface Config {
   botCallbackBaseUrl: string;
   /** Path to the role-mappings JSON config file. */
   roleMappingsPath: string;
+  /**
+   * Path to the FAQ Q&A JSON config file (`FAQ_PATH`, default
+   * `config/faq.json`). Optional — a missing file degrades `/faq` to the static
+   * get-started guide, so it is never a required var.
+   */
+  faqPath: string;
   /** Path to the SQLite database file. */
   dbPath: string;
   /**
@@ -120,6 +126,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     appLoginBaseUrl: stripTrailingSlash(env.APP_LOGIN_BASE_URL as string),
     botCallbackBaseUrl: stripTrailingSlash(env.BOT_CALLBACK_BASE_URL as string),
     roleMappingsPath: env.ROLE_MAPPINGS_PATH as string,
+    // Optional with a default: unset/blank → the conventional config/faq.json.
+    // Not in REQUIRED_VARS, so existing deploys boot unchanged.
+    faqPath: isPresent(env.FAQ_PATH) ? env.FAQ_PATH.trim() : 'config/faq.json',
     dbPath: env.DB_PATH as string,
     // Optional: absent or blank → undefined (Manage Roles is the only mod gate).
     modRoleId: isPresent(env.MOD_ROLE_ID) ? env.MOD_ROLE_ID.trim() : undefined,
