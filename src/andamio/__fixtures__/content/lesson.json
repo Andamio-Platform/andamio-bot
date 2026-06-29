@@ -1,0 +1,15 @@
+{
+  "title": "What is Andamio?",
+  "description": "A short orientation to the platform.",
+  "image_url": "https://cdn.andamio.io/courses/intro/lesson-101-0.png",
+  "video_url": "https://video.andamio.io/intro/101-0.mp4",
+  "content_json": {
+    "type": "doc",
+    "content": [
+      {
+        "type": "paragraph",
+        "content": [{ "type": "text", "text": "Andamio is a platform for..." }]
+      }
+    ]
+  }
+}

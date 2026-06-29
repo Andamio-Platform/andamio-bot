@@ -1,0 +1,23 @@
+[
+  {
+    "title": "Getting Started",
+    "description": "Orientation to the course and how to navigate it.",
+    "image_url": "https://cdn.andamio.io/courses/intro/module-101.png",
+    "is_live": true,
+    "course_module_code": "101"
+  },
+  {
+    "title": "Core Concepts",
+    "description": "The foundational ideas you will build on.",
+    "image_url": "https://cdn.andamio.io/courses/intro/module-102.png",
+    "is_live": true,
+    "course_module_code": "102"
+  },
+  {
+    "title": "Draft Module (not yet published)",
+    "description": "Work in progress — should be filtered out by is_live.",
+    "image_url": "",
+    "is_live": false,
+    "course_module_code": "103"
+  }
+]
