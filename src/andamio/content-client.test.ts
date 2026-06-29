@@ -38,35 +38,27 @@ const MODULE = '101';
 // --- mappers (U3/U4): pinned to the captured fixtures + envelope/totality ---
 
 describe('mapModules', () => {
-  it('maps the modules fixture, coercing is_live to boolean', () => {
+  it('maps the live modules fixture, reading fields nested under `content`', () => {
     const modules = mapModules(modulesFixture);
     expect(modules).toEqual([
       {
-        title: 'Getting Started',
-        description: 'Orientation to the course and how to navigate it.',
-        imageUrl: 'https://cdn.andamio.io/courses/intro/module-101.png',
-        isLive: true,
+        title: 'About Andamio Issuer',
+        description: 'Introducing the new Andamio Issuer product.',
+        isLive: false,
         moduleCode: '101',
       },
       {
-        title: 'Core Concepts',
-        description: 'The foundational ideas you will build on.',
-        imageUrl: 'https://cdn.andamio.io/courses/intro/module-102.png',
+        title: 'Getting Started with Issuer',
+        description: 'A live module, included so tests exercise the is_live filter.',
         isLive: true,
         moduleCode: '102',
-      },
-      {
-        title: 'Draft Module (not yet published)',
-        description: 'Work in progress — should be filtered out by is_live.',
-        imageUrl: '',
-        isLive: false,
-        moduleCode: '103',
       },
     ]);
   });
 
-  it('unwraps a { data: [...] } envelope (shape-agnostic)', () => {
-    expect(mapModules({ data: modulesFixture })).toEqual(mapModules(modulesFixture));
+  it('maps a bare (un-enveloped) array identically to the enveloped fixture', () => {
+    const bare = (modulesFixture as { data: unknown[] }).data;
+    expect(mapModules(bare)).toEqual(mapModules(modulesFixture));
   });
 
   it('tolerates an empty array, missing body, and non-array body', () => {
@@ -76,49 +68,56 @@ describe('mapModules', () => {
     expect(mapModules('garbage')).toEqual([]);
   });
 
-  it('drops a module entry missing course_module_code', () => {
+  it('falls back to entry-level fields when there is no nested `content`', () => {
     const modules = mapModules([
       { title: 'Keep', course_module_code: '201', is_live: true },
       { title: 'Drop — no code', is_live: true },
     ]);
     expect(modules).toHaveLength(1);
-    expect(modules[0].moduleCode).toBe('201');
+    expect(modules[0]).toEqual({
+      title: 'Keep',
+      description: '',
+      isLive: true,
+      moduleCode: '201',
+    });
   });
 
-  it('coerces string/number encodings of is_live', () => {
+  it('coerces string/number encodings of is_live (nested under content)', () => {
     const modules = mapModules([
-      { course_module_code: 'a', is_live: 'true' },
-      { course_module_code: 'b', is_live: 'false' },
-      { course_module_code: 'c', is_live: 1 },
-      { course_module_code: 'd', is_live: 0 },
+      { content: { course_module_code: 'a', is_live: 'true' } },
+      { content: { course_module_code: 'b', is_live: 'false' } },
+      { content: { course_module_code: 'c', is_live: 1 } },
+      { content: { course_module_code: 'd', is_live: 0 } },
     ]);
     expect(modules.map((m) => m.isLive)).toEqual([true, false, true, false]);
   });
 });
 
 describe('mapSlts', () => {
-  it('maps the slts fixture, preserving slt_index 0 and coercing has_lesson', () => {
+  it('maps the live slts fixture, digging into `data.slts` and ignoring embedded lessons', () => {
     const slts = mapSlts(sltsFixture);
     expect(slts).toEqual([
       {
-        sltText: 'I can describe what Andamio is and who it is for.',
-        sltIndex: 0,
-        hasLesson: true,
-      },
-      {
-        sltText: 'I can navigate the course interface.',
+        sltText:
+          'I can explain how the Andamio Issuer product differs from the Andamio API.',
         sltIndex: 1,
         hasLesson: true,
       },
       {
-        sltText: 'I can explain a concept that has no lesson yet.',
+        sltText: 'I can identify the target market for the Andamio Issuer product.',
         sltIndex: 2,
-        hasLesson: false,
+        hasLesson: true,
+      },
+      {
+        sltText:
+          'I can find the documentation and resources that support Andamio Issuer.',
+        sltIndex: 3,
+        hasLesson: true,
       },
     ]);
   });
 
-  it('drops an entry with a non-numeric slt_index but keeps index 0', () => {
+  it('drops an entry with a non-numeric slt_index but keeps index 0 (bare array)', () => {
     const slts = mapSlts([
       { slt_text: 'zero', slt_index: 0 },
       { slt_text: 'missing index' },
@@ -127,67 +126,58 @@ describe('mapSlts', () => {
     expect(slts.map((s) => s.sltIndex)).toEqual([0]);
   });
 
-  it('tolerates empty / missing / enveloped bodies', () => {
+  it('tolerates empty / missing bodies and maps the bare inner object identically', () => {
     expect(mapSlts([])).toEqual([]);
     expect(mapSlts({})).toEqual([]);
-    expect(mapSlts({ data: sltsFixture })).toEqual(mapSlts(sltsFixture));
+    const bareInner = (sltsFixture as { data: unknown }).data;
+    expect(mapSlts(bareInner)).toEqual(mapSlts(sltsFixture));
   });
 });
 
+/** Read the nested `data.content.content_json` from a content fixture. */
+function fixtureContentJson(fixture: unknown): unknown {
+  return (fixture as { data: { content: { content_json: unknown } } }).data.content
+    .content_json;
+}
+
 describe('mapLesson', () => {
-  it('maps the lesson fixture and passes content_json through opaquely', () => {
+  it('maps the live lesson fixture (title + content_json nested under data.content)', () => {
     const lesson = mapLesson(lessonFixture);
-    expect(lesson.title).toBe('What is Andamio?');
-    expect(lesson.description).toBe('A short orientation to the platform.');
-    expect(lesson.imageUrl).toBe('https://cdn.andamio.io/courses/intro/lesson-101-0.png');
-    expect(lesson.videoUrl).toBe('https://video.andamio.io/intro/101-0.mp4');
-    expect(lesson.contentJson).toEqual((lessonFixture as { content_json: unknown }).content_json);
+    expect(lesson.title).toBe('Two Products, Two Jobs: Issuer and API');
+    expect(lesson.contentJson).toEqual(fixtureContentJson(lessonFixture));
   });
 
-  it('unwraps a { data: {...} } envelope', () => {
-    expect(mapLesson({ data: lessonFixture })).toEqual(mapLesson(lessonFixture));
+  it('maps the bare inner object identically to the enveloped fixture', () => {
+    const bareInner = (lessonFixture as { data: unknown }).data;
+    expect(mapLesson(bareInner)).toEqual(mapLesson(lessonFixture));
   });
 
-  it('defaults every field on a missing/empty body and nulls absent content_json', () => {
-    expect(mapLesson({})).toEqual({
-      title: '',
-      description: '',
-      imageUrl: '',
-      videoUrl: '',
-      contentJson: null,
-    });
+  it('defaults the title and nulls content_json on a missing/empty body', () => {
+    expect(mapLesson({})).toEqual({ title: '', contentJson: null });
     expect(mapLesson(undefined).contentJson).toBeNull();
   });
 });
 
 describe('mapAssignment', () => {
-  it('maps every field of the assignment fixture', () => {
+  it('maps the live assignment fixture (title + content_json under data.content)', () => {
     expect(mapAssignment(assignmentFixture)).toEqual({
-      title: 'Module 101 Assignment',
-      description: 'Demonstrate that you can navigate the course.',
-      imageUrl: 'https://cdn.andamio.io/courses/intro/assignment-101.png',
-      videoUrl: '',
-      contentJson: (assignmentFixture as { content_json: unknown }).content_json,
+      title: 'Show What You Know',
+      contentJson: fixtureContentJson(assignmentFixture),
     });
   });
 
-  it('tolerates missing/enveloped bodies', () => {
+  it('tolerates a missing body and maps the bare inner object identically', () => {
     expect(mapAssignment({}).title).toBe('');
-    expect(mapAssignment({ data: assignmentFixture })).toEqual(
-      mapAssignment(assignmentFixture),
-    );
+    const bareInner = (assignmentFixture as { data: unknown }).data;
+    expect(mapAssignment(bareInner)).toEqual(mapAssignment(assignmentFixture));
   });
 
   // mapLesson and mapAssignment are deliberately identical today (the API
-  // returns the same shape for both). Pin that identity so a field added to
-  // one mapper but not the other fails loudly instead of silently diverging.
+  // returns the same { title, content_json } shape for both). Pin that identity
+  // so a field added to one mapper but not the other fails loudly.
   it('produces the same result as mapLesson for an identical body', () => {
     const body = {
-      title: 'Same',
-      description: 'Same body',
-      image_url: 'https://cdn.andamio.io/x.png',
-      video_url: 'https://video.andamio.io/x.mp4',
-      content_json: { type: 'doc', content: [] },
+      content: { title: 'Same', content_json: { type: 'doc', content: [] } },
     };
     expect(mapAssignment(body)).toEqual(mapLesson(body));
   });
@@ -270,7 +260,7 @@ describe('public read functions', () => {
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe(`${BASE}/api/v2/course/user/modules/${CID}`);
     expectPublicHeaders(init);
-    expect(modules).toHaveLength(3);
+    expect(modules).toHaveLength(2);
   });
 
   it('getModuleSlts builds the slts path, sends X-API-Key only, and maps the body', async () => {
@@ -292,7 +282,7 @@ describe('public read functions', () => {
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe(`${BASE}/api/v2/course/user/lesson/${CID}/${MODULE}/0`);
     expectPublicHeaders(init);
-    expect(lesson.title).toBe('What is Andamio?');
+    expect(lesson.title).toBe('Two Products, Two Jobs: Issuer and API');
   });
 
   it('getAssignment builds the assignment path, sends X-API-Key only, and maps the body', async () => {
@@ -413,6 +403,6 @@ describe('fetch layer error taxonomy', () => {
       jsonResponse(modulesFixture, 206),
     );
     const modules = await getCourseModules(BASE, KEY, CID);
-    expect(modules).toHaveLength(3);
+    expect(modules).toHaveLength(2);
   });
 });

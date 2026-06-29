@@ -1,15 +1,48 @@
 {
-  "title": "Module 101 Assignment",
-  "description": "Demonstrate that you can navigate the course.",
-  "image_url": "https://cdn.andamio.io/courses/intro/assignment-101.png",
-  "video_url": "",
-  "content_json": {
-    "type": "doc",
-    "content": [
-      {
-        "type": "paragraph",
-        "content": [{ "type": "text", "text": "Complete the following steps..." }]
+  "data": {
+    "course_id": "ae192632aabe00ed2042eaef596bc15f3887fa32e75e8f9b8fa516df",
+    "course_module_code": "101",
+    "slt_hash": "e9b5343186f83ed804a9fd87293a7378e3b237743b76d56da73b111d855631db",
+    "created_by": "james",
+    "content": {
+      "title": "Show What You Know",
+      "content_json": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "paragraph",
+            "content": [
+              {
+                "type": "text",
+                "text": "Andamio Issuer is a new product, and you are among the first thinking it through"
+              },
+              {
+                "type": "text",
+                "text": " with us."
+              }
+            ]
+          },
+          {
+            "type": "paragraph",
+            "content": [
+              {
+                "type": "text",
+                "marks": [
+                  {
+                    "type": "bold"
+                  }
+                ],
+                "text": "Put most of your effort into the second prompt."
+              },
+              {
+                "type": "text",
+                "text": " The first and third are quick."
+              }
+            ]
+          }
+        ]
       }
-    ]
+    },
+    "source": "merged"
   }
 }

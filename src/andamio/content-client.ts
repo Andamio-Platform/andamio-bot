@@ -13,14 +13,17 @@
  * destabilize the gate. The one thing the two share is the {@link ApiError}
  * taxonomy (re-exported below) so command-layer `catch` branches stay uniform.
  *
- * Shape note: the response field names below are source-mapped from the API, not
- * contract-guaranteed (see the PR plan, KTD5). Every mapper is therefore TOTAL —
- * it tolerates a `{ data: ... }` envelope OR a bare body, coerces types
- * defensively, drops malformed entries, and never throws on shape. Only the fetch
- * layer throws, and only {@link ApiError}. A drift degrades to empty content in
- * the eventual embed, never to a crash. Fixtures backing the mapper tests live in
- * `src/andamio/__fixtures__/content/` (shapes currently UNCONFIRMED — see that
- * directory's README).
+ * Shape note: the response field names below are LIVE-CONFIRMED against mainnet
+ * (`https://api.andamio.io`, 2026-06-29 — see the `__fixtures__/content/` README).
+ * The live shapes differ materially from the original source-mapped guess: every
+ * endpoint wraps its payload in a `{ data: ... }` envelope, module fields are
+ * nested under a per-entry `content` object (and carry NO image url), the SLTs
+ * array is nested under `data.slts`, and lesson/assignment bodies expose only
+ * `content.title` + `content.content_json` (no description/image/video). Every
+ * mapper is TOTAL — it tolerates the envelope (or a bare body), digs through the
+ * nesting defensively, drops malformed entries, and never throws on shape. Only
+ * the fetch layer throws, and only {@link ApiError}. A future drift degrades to
+ * empty content in the embed, never to a crash.
  */
 
 import { ApiError, type ApiErrorKind } from './dashboard-client';
@@ -29,11 +32,14 @@ import { ApiError, type ApiErrorKind } from './dashboard-client';
 export { ApiError };
 export type { ApiErrorKind };
 
-/** A course module as surfaced for previews/progress. */
+/**
+ * A course module as surfaced for previews/progress. The live API nests these
+ * fields under a per-entry `content` object and supplies no image url, so the
+ * domain type carries only what the endpoint actually provides.
+ */
 export interface CourseModule {
   title: string;
   description: string;
-  imageUrl: string;
   isLive: boolean;
   moduleCode: string;
 }
@@ -45,23 +51,21 @@ export interface ModuleSlt {
   hasLesson: boolean;
 }
 
-/** Rendered lesson content (Tiptap `contentJson` passed through opaquely). */
+/**
+ * Rendered lesson content. The live lesson endpoint exposes only a title and the
+ * opaque Tiptap `contentJson` (no description/image/video), so the display layer
+ * renders the title plus a plain-text excerpt of the content.
+ */
 export interface LessonContent {
   title: string;
-  description: string;
-  imageUrl: string;
-  videoUrl: string;
-  /** Opaque Tiptap document; rendering is a later PR's concern. */
+  /** Opaque Tiptap document; the command layer extracts a plain-text excerpt. */
   contentJson: unknown;
 }
 
 /** Rendered assignment content (same shape as a lesson). */
 export interface AssignmentContent {
   title: string;
-  description: string;
-  imageUrl: string;
-  videoUrl: string;
-  /** Opaque Tiptap document; rendering is a later PR's concern. */
+  /** Opaque Tiptap document; the command layer extracts a plain-text excerpt. */
   contentJson: unknown;
 }
 
@@ -122,10 +126,10 @@ function prop(value: unknown, key: string): unknown {
 }
 
 /**
- * Unwrap an optional `{ data: ... }` envelope. The dashboard endpoint wraps its
- * payload in `data`; the content endpoints' envelope is source-mapped but
- * unconfirmed, so this tolerates either: if the body is an object carrying a
- * `data` property, use that; otherwise use the body as-is.
+ * Unwrap an optional `{ data: ... }` envelope. The dashboard endpoint and the
+ * live content endpoints both wrap their payload in `data` (confirmed against
+ * mainnet); this stays tolerant of a bare body too: if the body is an object
+ * carrying a `data` property, use that; otherwise use the body as-is.
  */
 function unwrap(body: unknown): unknown {
   if (typeof body === 'object' && body !== null && 'data' in body) {
@@ -136,26 +140,39 @@ function unwrap(body: unknown): unknown {
 
 // --- pure mappers (unknown → typed, total, never throw) ---
 
-/** Map a modules response into {@link CourseModule}[]. Drops entries with no module code. */
+/**
+ * Map a modules response into {@link CourseModule}[]. Drops entries with no module
+ * code. The live API nests the displayable fields under a per-entry `content`
+ * object; we read from there, falling back to the entry itself so a flatter shape
+ * still maps.
+ */
 export function mapModules(raw: unknown): CourseModule[] {
   return asArray(unwrap(raw))
     .map((entry): CourseModule | null => {
-      const moduleCode = asString(prop(entry, 'course_module_code'));
+      const content = prop(entry, 'content') ?? entry;
+      const moduleCode = asString(prop(content, 'course_module_code'));
       if (moduleCode === '') return null; // a module with no code is unusable
       return {
-        title: asString(prop(entry, 'title')),
-        description: asString(prop(entry, 'description')),
-        imageUrl: asString(prop(entry, 'image_url')),
-        isLive: asBool(prop(entry, 'is_live')),
+        title: asString(prop(content, 'title')),
+        description: asString(prop(content, 'description')),
+        isLive: asBool(prop(content, 'is_live')),
         moduleCode,
       };
     })
     .filter((m): m is CourseModule => m !== null);
 }
 
-/** Map an SLTs response into {@link ModuleSlt}[]. Drops entries with no numeric index. */
+/**
+ * Map an SLTs response into {@link ModuleSlt}[]. Drops entries with no numeric
+ * index. The live API nests the array under `data.slts` (an object, not a bare
+ * array), so dig into `slts` when the unwrapped body is an object; tolerate a
+ * bare array too. The per-SLT embedded `lesson` is ignored here — lesson content
+ * is read via {@link getLesson}.
+ */
 export function mapSlts(raw: unknown): ModuleSlt[] {
-  return asArray(unwrap(raw))
+  const inner = unwrap(raw);
+  const list = Array.isArray(inner) ? inner : asArray(prop(inner, 'slts'));
+  return list
     .map((entry): ModuleSlt | null => {
       const sltIndex = asNumber(prop(entry, 'slt_index'));
       if (sltIndex === null) return null; // index keys the SLT; 0 is valid, null is not
@@ -168,27 +185,30 @@ export function mapSlts(raw: unknown): ModuleSlt[] {
     .filter((s): s is ModuleSlt => s !== null);
 }
 
-/** Map a lesson response into {@link LessonContent}. Missing fields default to empty. */
+/**
+ * Map a lesson response into {@link LessonContent}. The live API nests the body
+ * under `data.content` ({ title, content_json }); read from there, falling back
+ * to the unwrapped body. Missing fields default to empty/null.
+ */
 export function mapLesson(raw: unknown): LessonContent {
   const data = unwrap(raw);
+  const content = prop(data, 'content') ?? data;
   return {
-    title: asString(prop(data, 'title')),
-    description: asString(prop(data, 'description')),
-    imageUrl: asString(prop(data, 'image_url')),
-    videoUrl: asString(prop(data, 'video_url')),
-    contentJson: prop(data, 'content_json') ?? null,
+    title: asString(prop(content, 'title')),
+    contentJson: prop(content, 'content_json') ?? null,
   };
 }
 
-/** Map an assignment response into {@link AssignmentContent}. Missing fields default to empty. */
+/**
+ * Map an assignment response into {@link AssignmentContent}. Same nested shape as
+ * a lesson (`data.content` → { title, content_json }).
+ */
 export function mapAssignment(raw: unknown): AssignmentContent {
   const data = unwrap(raw);
+  const content = prop(data, 'content') ?? data;
   return {
-    title: asString(prop(data, 'title')),
-    description: asString(prop(data, 'description')),
-    imageUrl: asString(prop(data, 'image_url')),
-    videoUrl: asString(prop(data, 'video_url')),
-    contentJson: prop(data, 'content_json') ?? null,
+    title: asString(prop(content, 'title')),
+    contentJson: prop(content, 'content_json') ?? null,
   };
 }
 

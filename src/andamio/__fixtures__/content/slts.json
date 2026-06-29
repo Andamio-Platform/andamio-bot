@@ -1,17 +1,143 @@
-[
-  {
-    "slt_text": "I can describe what Andamio is and who it is for.",
-    "slt_index": 0,
-    "has_lesson": true
-  },
-  {
-    "slt_text": "I can navigate the course interface.",
-    "slt_index": 1,
-    "has_lesson": true
-  },
-  {
-    "slt_text": "I can explain a concept that has no lesson yet.",
-    "slt_index": 2,
-    "has_lesson": false
+{
+  "data": {
+    "course_id": "ae192632aabe00ed2042eaef596bc15f3887fa32e75e8f9b8fa516df",
+    "course_module_code": "101",
+    "slt_hash": "e9b5343186f83ed804a9fd87293a7378e3b237743b76d56da73b111d855631db",
+    "created_by": "james",
+    "slts": [
+      {
+        "slt_index": 1,
+        "slt_text": "I can explain how the Andamio Issuer product differs from the Andamio API.",
+        "has_lesson": true,
+        "lesson": {
+          "title": "Two Products, Two Jobs: Issuer and API",
+          "content_json": {
+            "type": "doc",
+            "content": [
+              {
+                "type": "paragraph",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "Andamio comes in two products. Both work with verifiable, on-chain credentials,"
+                  },
+                  {
+                    "type": "text",
+                    "text": " but they are built for different people."
+                  }
+                ]
+              },
+              {
+                "type": "paragraph",
+                "content": [
+                  {
+                    "type": "text",
+                    "marks": [
+                      {
+                        "type": "bold"
+                      }
+                    ],
+                    "text": "Who handles the blockchain."
+                  },
+                  {
+                    "type": "text",
+                    "text": " With Andamio Issuer the blockchain is completely abstracted away."
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      {
+        "slt_index": 2,
+        "slt_text": "I can identify the target market for the Andamio Issuer product.",
+        "has_lesson": true,
+        "lesson": {
+          "title": "Who Andamio Issuer Is For",
+          "content_json": {
+            "type": "doc",
+            "content": [
+              {
+                "type": "paragraph",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "Andamio comes in two products. Both work with verifiable, on-chain credentials,"
+                  },
+                  {
+                    "type": "text",
+                    "text": " but they are built for different people."
+                  }
+                ]
+              },
+              {
+                "type": "paragraph",
+                "content": [
+                  {
+                    "type": "text",
+                    "marks": [
+                      {
+                        "type": "bold"
+                      }
+                    ],
+                    "text": "Who handles the blockchain."
+                  },
+                  {
+                    "type": "text",
+                    "text": " With Andamio Issuer the blockchain is completely abstracted away."
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      {
+        "slt_index": 3,
+        "slt_text": "I can find the documentation and resources that support Andamio Issuer.",
+        "has_lesson": true,
+        "lesson": {
+          "title": "Finding Documentation and Resources",
+          "content_json": {
+            "type": "doc",
+            "content": [
+              {
+                "type": "paragraph",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "Andamio comes in two products. Both work with verifiable, on-chain credentials,"
+                  },
+                  {
+                    "type": "text",
+                    "text": " but they are built for different people."
+                  }
+                ]
+              },
+              {
+                "type": "paragraph",
+                "content": [
+                  {
+                    "type": "text",
+                    "marks": [
+                      {
+                        "type": "bold"
+                      }
+                    ],
+                    "text": "Who handles the blockchain."
+                  },
+                  {
+                    "type": "text",
+                    "text": " With Andamio Issuer the blockchain is completely abstracted away."
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      }
+    ],
+    "source": "merged"
   }
-]
+}
