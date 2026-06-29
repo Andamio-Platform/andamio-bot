@@ -38,19 +38,22 @@ const MODULE = '101';
 // --- mappers (U3/U4): pinned to the captured fixtures + envelope/totality ---
 
 describe('mapModules', () => {
-  it('maps the live modules fixture, reading fields nested under `content`', () => {
+  it('maps the live modules fixture: onChain from top-level slt_hash, content fields nested', () => {
     const modules = mapModules(modulesFixture);
     expect(modules).toEqual([
       {
         title: 'About Andamio Issuer',
         description: 'Introducing the new Andamio Issuer product.',
-        isLive: false,
+        // 101 is on-chain (non-empty slt_hash) even though content.is_live is false.
+        onChain: true,
         moduleCode: '101',
       },
       {
         title: 'Getting Started with Issuer',
-        description: 'A live module, included so tests exercise the is_live filter.',
-        isLive: true,
+        description:
+          'A module with no on-chain SLTs (no slt_hash), excluded by the onChain filter even though is_live is true.',
+        // 102 has no slt_hash → not on-chain, even though content.is_live is true.
+        onChain: false,
         moduleCode: '102',
       },
     ]);
@@ -68,28 +71,51 @@ describe('mapModules', () => {
     expect(mapModules('garbage')).toEqual([]);
   });
 
-  it('falls back to entry-level fields when there is no nested `content`', () => {
+  it('falls back to entry-level fields when there is no nested `content`, reading top-level slt_hash', () => {
     const modules = mapModules([
-      { title: 'Keep', course_module_code: '201', is_live: true },
-      { title: 'Drop — no code', is_live: true },
+      { title: 'Keep', course_module_code: '201', slt_hash: 'abc123' },
+      { title: 'Flat — no hash', course_module_code: '202' },
+      { title: 'Drop — no code', slt_hash: 'def456' },
     ]);
-    expect(modules).toHaveLength(1);
+    expect(modules).toHaveLength(2);
     expect(modules[0]).toEqual({
       title: 'Keep',
       description: '',
-      isLive: true,
+      // Flat shape: slt_hash is read from the entry itself (content === entry).
+      onChain: true,
       moduleCode: '201',
+    });
+    expect(modules[1]).toEqual({
+      title: 'Flat — no hash',
+      description: '',
+      onChain: false,
+      moduleCode: '202',
     });
   });
 
-  it('coerces string/number encodings of is_live (nested under content)', () => {
+  it('derives onChain from a non-empty top-level slt_hash, ignoring is_live', () => {
     const modules = mapModules([
-      { content: { course_module_code: 'a', is_live: 'true' } },
-      { content: { course_module_code: 'b', is_live: 'false' } },
-      { content: { course_module_code: 'c', is_live: 1 } },
-      { content: { course_module_code: 'd', is_live: 0 } },
+      // Non-empty slt_hash → on-chain, even with content.is_live false.
+      {
+        slt_hash: 'hash-1',
+        content: { course_module_code: 'a', is_live: false },
+      },
+      // No slt_hash → not on-chain, even with content.is_live true (is_live ignored).
+      { content: { course_module_code: 'b', is_live: true } },
+      // Empty-string slt_hash → not on-chain.
+      { slt_hash: '', content: { course_module_code: 'c' } },
+      // Non-string slt_hash coerces to '' → not on-chain.
+      { slt_hash: 12345, content: { course_module_code: 'd' } },
+      { slt_hash: { nested: true }, content: { course_module_code: 'e' } },
     ]);
-    expect(modules.map((m) => m.isLive)).toEqual([true, false, true, false]);
+    expect(modules.map((m) => m.onChain)).toEqual([true, false, false, false, false]);
+  });
+
+  it('drops the deprecated isLive field from mapped modules', () => {
+    const modules = mapModules(modulesFixture);
+    for (const m of modules) {
+      expect(m).not.toHaveProperty('isLive');
+    }
   });
 });
 

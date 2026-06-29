@@ -18,16 +18,13 @@
       "source": "merged"
     },
     {
-      "slt_hash": "f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8",
       "course_id": "ae192632aabe00ed2042eaef596bc15f3887fa32e75e8f9b8fa516df",
       "created_by": "james",
-      "on_chain_slts": [
-        "I can set up an Andamio Issuer course."
-      ],
+      "on_chain_slts": [],
       "content": {
         "course_module_code": "102",
         "title": "Getting Started with Issuer",
-        "description": "A live module, included so tests exercise the is_live filter.",
+        "description": "A module with no on-chain SLTs (no slt_hash), excluded by the onChain filter even though is_live is true.",
         "is_live": true
       },
       "source": "merged"

@@ -28,10 +28,17 @@ Because the mappers are **total and envelope-agnostic** (they tolerate a
 throw on shape), the drift surfaced as a fixture + mapper reconciliation, not a crash.
 
 The fixtures are trimmed for size: `content_json` documents are shortened to a couple
-of paragraphs (enough to exercise the excerpt walker), and `modules.json` adds one
-representative `is_live: true` module (`102`) alongside the real `101` (`is_live:
-false`) so the live-filter logic has both cases to test against. No secrets or member
-PII appear in any fixture.
+of paragraphs (enough to exercise the excerpt walker).
+
+**Module visibility is keyed on `slt_hash` presence, not `is_live`.** `is_live` is
+deprecated and reads `false` even for published, on-chain modules; the real "show this
+module" signal is a non-empty top-level `slt_hash` (the module's SLTs are on-chain).
+`mapModules` derives `CourseModule.onChain` from it. `modules.json` is built to pin
+**both** halves of that predicate: the real `101` is on-chain (non-empty `slt_hash`)
+yet `content.is_live: false` → **included**; the representative `102` has **no**
+`slt_hash` and an empty `on_chain_slts` yet `content.is_live: true` → **excluded**
+(proving `is_live` is never consulted for visibility). No secrets or member PII appear
+in any fixture.
 
 `commitments.json` remains **source-mapped, not yet live-confirmed** — its endpoint
 (`POST …/assignment-commitments/list`) is authenticated and requires a member JWT,
