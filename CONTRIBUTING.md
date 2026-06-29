@@ -29,16 +29,18 @@ Build and run the compiled bot with `npm run build && npm start`.
 - **The bot talks only to the Andamio API.** No wallet, signing, or Cardano code
   belongs in this repo.
 - **No secrets in git.** `.env` is gitignored; never commit a real token or API
-  key. `role-mappings.json` and `COURSE_DISPLAY_NAMES` are config (ids and
-  names), not secrets.
+  key. `role-mappings.json`, `faq.json`, and `COURSE_DISPLAY_NAMES` are config
+  (ids, names, and onboarding copy), not secrets.
 
 ## Project layout
 
 - `src/commands/`: slash commands (auto-discovered + auto-registered)
 - `src/gating/`: role-mapping rules, the evaluator, and re-evaluation triggers
 - `src/andamio/`: the Andamio API client, login flow, and display config
+- `src/faq/`: the `/faq` Q&A config loader and autocomplete matcher/ranker
 - `src/doctor.ts`: pre-deploy env validation (`npm run doctor`)
 - `config/role-mappings.json`: which credential unlocks which role
+- `config/faq.json`: the `/faq` Q&A entries (optional; `FAQ_PATH`)
 - `docs/`: onboarding guides (quickstart, concepts, deploy, troubleshooting,
   builder)
 

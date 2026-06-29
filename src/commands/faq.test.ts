@@ -29,10 +29,13 @@ vi.mock('../andamio/course-names', async (importOriginal) => {
   return { ...actual, loadCourseDisplayNames: () => ({}) };
 });
 
-const loadFaq = vi.fn<[], FaqEntry[]>();
+// Forward the filePath argument so tests can assert /faq passes config.faqPath
+// (not, say, roleMappingsPath) — otherwise reading the wrong file would still
+// pass every test.
+const loadFaq = vi.fn<[string | undefined], FaqEntry[]>();
 vi.mock('../faq/config', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../faq/config')>();
-  return { ...actual, loadFaq: () => loadFaq() };
+  return { ...actual, loadFaq: (path: string | undefined) => loadFaq(path) };
 });
 
 import { autocomplete, execute, renderAnswerEmbed } from './faq';
@@ -233,6 +236,9 @@ describe('/faq execute', () => {
     expect(embed.description).toMatch(/\/check/);
     // It's the answer, not the get-started guide.
     expect(stepValues(embed)).toHaveLength(0);
+    // /faq reads config.faqPath (not some other path) — guards against a
+    // wrong-key regression that would otherwise pass silently.
+    expect(loadFaq).toHaveBeenCalledWith('/tmp/faq.json');
   });
 
   it('unknown question id → friendly note + the static guide, ephemeral', async () => {
@@ -285,6 +291,8 @@ describe('/faq autocomplete', () => {
     expect(choices).toEqual([
       { name: 'How do I connect my account?', value: 'connect-account' },
     ]);
+    // Autocomplete also reads config.faqPath.
+    expect(loadFaq).toHaveBeenCalledWith('/tmp/faq.json');
   });
 
   it('empty focused query → all entries (capped), as {name,value}', async () => {

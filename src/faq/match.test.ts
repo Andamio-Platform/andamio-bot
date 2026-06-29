@@ -50,6 +50,19 @@ describe('rankFaqEntries', () => {
     expect(mixed.map((c) => c.value)).toContain('channel');
   });
 
+  it('ranks a question-substring match (tier 1) above an alias-only match (tier 2)', () => {
+    // 'find' is a mid-string substring of the first question (tier 1) and only
+    // an alias of the second (tier 2). The tier-1 entry must come first.
+    const choices = rankFaqEntries(
+      [
+        { id: 'a', question: 'where to find it', answer: 'x' },
+        { id: 'b', question: 'unrelated topic', answer: 'y', aliases: ['find'] },
+      ],
+      'find',
+    );
+    expect(choices.map((c) => c.value)).toEqual(['a', 'b']);
+  });
+
   it('matches on an alias when the question does not match', () => {
     const choices = rankFaqEntries(entries, 'locked');
     expect(choices.map((c) => c.value)).toEqual(['channel']);

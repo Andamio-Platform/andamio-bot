@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -63,6 +63,34 @@ describe('parseFaq — validation', () => {
     ).toThrow(/aliases/i);
   });
 
+  it('rejects an id longer than Discord\'s 100-char autocomplete value limit', () => {
+    expect(() =>
+      parseFaq([{ id: 'x'.repeat(101), question: 'q', answer: 'a' }]),
+    ).toThrow(/"id" longer than 100/i);
+    // Exactly at the limit is allowed.
+    expect(() =>
+      parseFaq([{ id: 'x'.repeat(100), question: 'q', answer: 'a' }]),
+    ).not.toThrow();
+  });
+
+  it('rejects a question longer than Discord\'s 256-char embed-title limit', () => {
+    expect(() =>
+      parseFaq([{ id: 'x', question: 'q'.repeat(257), answer: 'a' }]),
+    ).toThrow(/"question" longer than 256/i);
+    expect(() =>
+      parseFaq([{ id: 'x', question: 'q'.repeat(256), answer: 'a' }]),
+    ).not.toThrow();
+  });
+
+  it('rejects an answer longer than Discord\'s 4096-char embed-description limit', () => {
+    expect(() =>
+      parseFaq([{ id: 'x', question: 'q', answer: 'a'.repeat(4097) }]),
+    ).toThrow(/"answer" longer than 4096/i);
+    expect(() =>
+      parseFaq([{ id: 'x', question: 'q', answer: 'a'.repeat(4096) }]),
+    ).not.toThrow();
+  });
+
   it('rejects a duplicate id and names the offending entry', () => {
     expect(() =>
       parseFaq([
@@ -99,6 +127,15 @@ describe('loadFaq — file loading', () => {
 
   it('returns [] for a missing file (degrade to static guide)', () => {
     expect(loadFaq('/no/such/faq.json')).toEqual([]);
+  });
+
+  it('returns [] and logs for a non-ENOENT read error (e.g. a directory path)', () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    // Reading a directory as a file throws EISDIR (not ENOENT) → degrade + log.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'faq-dir-'));
+    expect(loadFaq(dir)).toEqual([]);
+    expect(errSpy).toHaveBeenCalled();
+    errSpy.mockRestore();
   });
 
   it('returns [] for an absent or empty path', () => {

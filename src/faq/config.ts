@@ -43,6 +43,16 @@ function isNonEmptyString(v: unknown): v is string {
 }
 
 /**
+ * Discord's hard limits on the fields these entries flow into. A `question`
+ * becomes an autocomplete choice name AND an answer-embed title (256); an
+ * `answer` becomes an embed description (4096); an `id` becomes an autocomplete
+ * choice value (100). Validating at load means a too-long entry throws here and
+ * `/faq` degrades to the static guide, rather than discord.js throwing a
+ * RangeError mid-reply and surfacing the generic error to the member (R6).
+ */
+const LIMITS = { id: 100, question: 256, answer: 4096 } as const;
+
+/**
  * Validate a parsed JSON value into {@link FaqEntry}[]. Throws an `Error` with a
  * clear, entry-indexed message on any of: not an array, an entry that is not an
  * object, a missing/empty `id`/`question`/`answer`, an `aliases` that is not an
@@ -79,6 +89,28 @@ export function parseFaq(parsed: unknown): FaqEntry[] {
       throw new Error(
         `Invalid FAQ config: ${where} (id "${e.id}") is missing a non-empty ` +
           `"answer".`,
+      );
+    }
+
+    if (e.id.length > LIMITS.id) {
+      throw new Error(
+        `Invalid FAQ config: ${where} (id "${e.id}") has an "id" longer than ` +
+          `${LIMITS.id} chars — ids are used as Discord autocomplete values, ` +
+          `which Discord caps at ${LIMITS.id}.`,
+      );
+    }
+    if (e.question.length > LIMITS.question) {
+      throw new Error(
+        `Invalid FAQ config: ${where} (id "${e.id}") has a "question" longer ` +
+          `than ${LIMITS.question} chars — it is used as an embed title, which ` +
+          `Discord caps at ${LIMITS.question}.`,
+      );
+    }
+    if (e.answer.length > LIMITS.answer) {
+      throw new Error(
+        `Invalid FAQ config: ${where} (id "${e.id}") has an "answer" longer ` +
+          `than ${LIMITS.answer} chars — it is used as an embed description, ` +
+          `which Discord caps at ${LIMITS.answer}.`,
       );
     }
 
@@ -128,9 +160,12 @@ export function loadFaq(filePath: string | undefined): FaqEntry[] {
   try {
     raw = fs.readFileSync(filePath, 'utf8');
   } catch (err) {
-    // A missing file is the "unconfigured" degrade path → empty list. Any other
-    // read error (permissions, etc.) also degrades rather than crashing /faq.
+    // A missing file is the expected "unconfigured" degrade path → silent
+    // empty list. Any other read error (e.g. EACCES) also degrades rather than
+    // crashing /faq, but log it so an operator can see why a configured FAQ
+    // isn't being served instead of it failing silently.
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    console.error(`/faq: could not read FAQ file at "${filePath}":`, err);
     return [];
   }
 
