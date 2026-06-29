@@ -32,6 +32,13 @@ values you produce yourself versus which ones Andamio hands you.
 - **Member JWT.** A short-lived token the bot stores after a member logs in, so
   it can read that member's credentials. Handled automatically; expires, and the
   bot prompts the member to reconnect when it does.
+- **FAQ Q&A config (`FAQ_PATH`).** A plain JSON file (default `config/faq.json`,
+  template in `config/faq.example.json`) of `{id, question, answer, aliases?}`
+  entries that power `/faq question:<…>` and its autocomplete. The `id` is the
+  stable lookup key (so rewording a question never breaks it); `question` is what
+  members see and search; `answer` is the reply. Adding a Q&A is a config edit
+  plus a restart — no code change. It is config, not a secret, and safe to
+  commit. A missing file just means `/faq` shows its static get-started guide.
 
 ## Where each value comes from
 
@@ -41,7 +48,7 @@ Every value the bot needs is one of three kinds:
 |---|---|---|
 | **You create** (in Discord) | `DISCORD_TOKEN`, `DISCORD_APP_ID`, `GUILD_ID`, and the **role id(s)** you gate on | You, in the Discord Developer Portal and your server |
 | **Andamio gives you** | `ANDAMIO_API_KEY`, `ANDAMIO_API_BASE_URL`, `APP_LOGIN_BASE_URL`, and each rule's `course_id` + `slt_hash` (and optionally an `earn_url`) | Andamio (ask in the [Andamio Network Discord](https://discord.gg/andamio) if you do not have these yet) |
-| **You choose / your host sets** | `BOT_CALLBACK_BASE_URL` (your bot's public URL, known after you deploy), `ROLE_MAPPINGS_PATH`, `DB_PATH`, `COURSE_DISPLAY_NAMES`, `SHOW_ALL_COURSES`, `MOD_ROLE_ID` (optional moderator role for the deny-list commands), `PORT` | You, or your hosting platform |
+| **You choose / your host sets** | `BOT_CALLBACK_BASE_URL` (your bot's public URL, known after you deploy), `ROLE_MAPPINGS_PATH`, `DB_PATH`, `COURSE_DISPLAY_NAMES`, `SHOW_ALL_COURSES`, `MOD_ROLE_ID` (optional moderator role for the deny-list commands), `FAQ_PATH` (optional `/faq` Q&A config), `PORT` | You, or your hosting platform |
 
 The hardest part for a new community is getting the Andamio-side values (the API
 key and a credential to gate on). At this stage Andamio provisions those and is
@@ -52,5 +59,5 @@ set up.
 
 Only `ANDAMIO_API_KEY` and `DISCORD_TOKEN` are secret. They go in your host's
 secret store (or your local, gitignored `.env`), never in a committed file.
-`role-mappings.json` and `COURSE_DISPLAY_NAMES` are config, not secrets: they
-hold ids and names, and are safe to commit.
+`role-mappings.json`, `faq.json`, and `COURSE_DISPLAY_NAMES` are config, not
+secrets: they hold ids, names, and onboarding copy, and are safe to commit.

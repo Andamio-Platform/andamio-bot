@@ -1,0 +1,20 @@
+[
+  {
+    "id": "connect-account",
+    "question": "How do I connect my Andamio account?",
+    "answer": "Run `/login` and follow the link to connect your Andamio account to this Discord. You only need to do this once.",
+    "aliases": ["login", "sign in", "link account", "get started"]
+  },
+  {
+    "id": "cant-see-channel",
+    "question": "Why can't I see a channel?",
+    "answer": "Channels are unlocked by Andamio credentials. Run `/check` to refresh your roles, then `/available` to see which credentials gate which channels.",
+    "aliases": ["locked channel", "missing channel", "access"]
+  },
+  {
+    "id": "see-credentials",
+    "question": "How do I see the credentials I hold?",
+    "answer": "Run `/credentials` to list the Andamio credentials on your connected account.",
+    "aliases": ["my credentials", "inventory"]
+  }
+]
