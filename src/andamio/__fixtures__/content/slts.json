@@ -1,0 +1,17 @@
+[
+  {
+    "slt_text": "I can describe what Andamio is and who it is for.",
+    "slt_index": 0,
+    "has_lesson": true
+  },
+  {
+    "slt_text": "I can navigate the course interface.",
+    "slt_index": 1,
+    "has_lesson": true
+  },
+  {
+    "slt_text": "I can explain a concept that has no lesson yet.",
+    "slt_index": 2,
+    "has_lesson": false
+  }
+]

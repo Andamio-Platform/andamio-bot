@@ -1,0 +1,15 @@
+{
+  "title": "Module 101 Assignment",
+  "description": "Demonstrate that you can navigate the course.",
+  "image_url": "https://cdn.andamio.io/courses/intro/assignment-101.png",
+  "video_url": "",
+  "content_json": {
+    "type": "doc",
+    "content": [
+      {
+        "type": "paragraph",
+        "content": [{ "type": "text", "text": "Complete the following steps..." }]
+      }
+    ]
+  }
+}

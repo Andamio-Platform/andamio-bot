@@ -1,0 +1,17 @@
+[
+  {
+    "course_id": "ae192632aabe00ed2042eaef596bc15f3887fa32e75e8f9b8fa516df",
+    "course_module_code": "101",
+    "status": "APPROVED"
+  },
+  {
+    "course_id": "ae192632aabe00ed2042eaef596bc15f3887fa32e75e8f9b8fa516df",
+    "course_module_code": "102",
+    "status": "SUBMITTED"
+  },
+  {
+    "course_id": "ae192632aabe00ed2042eaef596bc15f3887fa32e75e8f9b8fa516df",
+    "course_module_code": "104",
+    "status": "REFUSED"
+  }
+]
