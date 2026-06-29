@@ -7,9 +7,51 @@ import {
 import { loadConfig } from '../config';
 import { getDb } from '../db/handle';
 import { loadMappings } from '../gating/mappings';
-import { reevaluateMember } from '../gating/triggers';
+import { reevaluateMember, type ReevaluationOutcome } from '../gating/triggers';
 import { upsertDenial, FULL_BLOCK } from '../db/denials';
 import { requireModerator } from './mod-auth';
+
+/**
+ * Build the moderator-facing lead line for a deny, reporting what actually
+ * happened rather than an assumed success. The denial row is always written
+ * first; whether the live role(s) dropped depends on the member's state, so the
+ * message is keyed on the re-evaluation `outcome` plus `removeFailed` (did a
+ * managed-role removal fail, e.g. a role positioned above the bot's own role).
+ *
+ * `scope` is the caller's phrase for what was denied — a role mention, the
+ * joined mentions of a channel's gating roles, or "all gated roles". Shared by
+ * every `/deny` addressing mode so their wording cannot drift apart.
+ */
+function denyOutcomeLead(
+  outcome: ReevaluationOutcome,
+  scope: string,
+  removeFailed: boolean,
+  targetId: string,
+): string {
+  if (outcome.status === 'skipped') {
+    return (
+      `Recorded a block on <@${targetId}> for ${scope}. They aren’t connected ` +
+      'right now, so it will apply automatically the next time they log in.'
+    );
+  }
+  if (outcome.status === 'failed') {
+    return (
+      `Recorded a block on <@${targetId}> for ${scope}. I couldn’t re-check ` +
+      'their roles just now — it will be enforced on the next sweep.'
+    );
+  }
+  if (removeFailed) {
+    return (
+      `Recorded a block on <@${targetId}> for ${scope}, but I could not remove ` +
+      'the role — it likely sits above my own role in Server Settings → Roles. ' +
+      'Move my role above it, then run `/check` on the member.'
+    );
+  }
+  return (
+    `Denied <@${targetId}> from ${scope}. The block is live now and holds ` +
+    'through every sweep until you `/allow` it.'
+  );
+}
 
 export const data = new SlashCommandBuilder()
   .setName('deny')
@@ -79,31 +121,12 @@ export async function execute(
   const scope = role ? `<@&${role.id}>` : '**all gated roles**';
   const reasonLine = reason ? `\nReason: ${reason}` : '';
 
-  // Report what actually happened, not an assumed success. The denial row is
-  // always written; whether the live role dropped depends on the member's state.
+  // The denial row is always written; whether the live role dropped depends on
+  // the member's state. `denyOutcomeLead` reports that honestly.
   const removeFailed = role
     ? outcome.failed.includes(role.id)
     : outcome.failed.length > 0;
-
-  let lead: string;
-  if (outcome.status === 'skipped') {
-    lead =
-      `Recorded a block on <@${target.id}> for ${scope}. They aren’t connected ` +
-      'right now, so it will apply automatically the next time they log in.';
-  } else if (outcome.status === 'failed') {
-    lead =
-      `Recorded a block on <@${target.id}> for ${scope}. I couldn’t re-check ` +
-      'their roles just now — it will be enforced on the next sweep.';
-  } else if (removeFailed) {
-    lead =
-      `Recorded a block on <@${target.id}> for ${scope}, but I could not remove ` +
-      'the role — it likely sits above my own role in Server Settings → Roles. ' +
-      'Move my role above it, then run `/check` on the member.';
-  } else {
-    lead =
-      `Denied <@${target.id}> from ${scope}. The block is live now and holds ` +
-      'through every sweep until you `/allow` it.';
-  }
+  const lead = denyOutcomeLead(outcome, scope, removeFailed, target.id);
 
   await interaction.reply({
     content: `${lead}${reasonLine}`,
