@@ -73,9 +73,9 @@ import assignmentFixture from '../andamio/__fixtures__/content/assignment.json';
 
 const CID = 'ae192632aabe00ed2042eaef596bc15f3887fa32e75e8f9b8fa516df';
 
-/** Modules from the confirmed fixture (101 draft, 102 live). */
+/** Modules from the confirmed fixture (101 on-chain, 102 not on-chain). */
 const allModules = mapModules(modulesFixture);
-const liveModules = allModules.filter((m) => m.isLive);
+const onChainModules = allModules.filter((m) => m.onChain);
 
 const filterOf = (
   names: Record<string, string> = {},
@@ -179,20 +179,20 @@ describe('tiptapExcerpt', () => {
 // --- renderModuleListEmbed (U2) --------------------------------------------
 
 describe('renderModuleListEmbed', () => {
-  it('lists only the live modules from the confirmed fixture, with codes', () => {
-    const embed = renderModuleListEmbed('Andamio Issuer', liveModules).toJSON();
+  it('lists only the on-chain modules from the confirmed fixture, with codes', () => {
+    const embed = renderModuleListEmbed('Andamio Issuer', onChainModules).toJSON();
     expect(embed.title).toBe('Preview — Andamio Issuer');
     const modulesField = fieldVal(embed, 'Modules');
-    expect(modulesField).toContain('Getting Started with Issuer');
-    expect(modulesField).toContain('`102`');
-    // The draft module (101, is_live false) is not in liveModules → not shown.
-    expect(modulesField).not.toContain('About Andamio Issuer');
-    expect(modulesField).not.toContain('`101`');
+    expect(modulesField).toContain('About Andamio Issuer');
+    expect(modulesField).toContain('`101`');
+    // Module 102 (no slt_hash, is_live true) is not on-chain → not shown.
+    expect(modulesField).not.toContain('Getting Started with Issuer');
+    expect(modulesField).not.toContain('`102`');
   });
 
-  it('renders an empty-state description and no field when there are no live modules', () => {
+  it('renders an empty-state description and no field when there are no modules', () => {
     const embed = renderModuleListEmbed('Andamio Issuer', []).toJSON();
-    expect(embed.description).toMatch(/no live modules/i);
+    expect(embed.description).toMatch(/no modules/i);
     expect(embed.fields ?? []).toHaveLength(0);
   });
 });
@@ -200,7 +200,7 @@ describe('renderModuleListEmbed', () => {
 // --- renderModulePreviewEmbed (U2) -----------------------------------------
 
 describe('renderModulePreviewEmbed', () => {
-  const module = liveModules[0];
+  const module = onChainModules[0];
 
   it('renders a lesson: labelled title, excerpt, and a module reference', () => {
     const embed = renderModulePreviewEmbed(
@@ -210,7 +210,7 @@ describe('renderModulePreviewEmbed', () => {
     ).toJSON();
     expect(embed.title).toBe('Lesson: Two Products, Two Jobs: Issuer and API');
     expect(embed.description).toContain('Andamio comes in two products');
-    expect(fieldVal(embed, 'Module')).toContain('`102`');
+    expect(fieldVal(embed, 'Module')).toContain('`101`');
   });
 
   it('renders an assignment with the assignment label', () => {
@@ -288,21 +288,21 @@ describe('courseChoices', () => {
 });
 
 describe('moduleChoices', () => {
-  it('returns only live modules from the confirmed fixture, valued by code', () => {
+  it('returns only on-chain modules from the confirmed fixture, valued by code', () => {
     const choices = moduleChoices(allModules, '');
     expect(choices).toEqual([
-      { name: 'Getting Started with Issuer (102)', value: '102' },
+      { name: 'About Andamio Issuer (101)', value: '101' },
     ]);
   });
 
   it('narrows by the focused query over title and code', () => {
-    expect(moduleChoices(allModules, '102')).toHaveLength(1);
+    expect(moduleChoices(allModules, '101')).toHaveLength(1);
     expect(moduleChoices(allModules, 'nope')).toHaveLength(0);
   });
 
   it('truncates an over-long module choice name to Discord 100-char limit', () => {
     const choices = moduleChoices(
-      [{ title: 'M'.repeat(150), description: '', isLive: true, moduleCode: '900' }],
+      [{ title: 'M'.repeat(150), description: '', onChain: true, moduleCode: '900' }],
       '',
     );
     expect(choices).toHaveLength(1);
@@ -324,7 +324,7 @@ describe('isCourseSelectable', () => {
 // --- execute (U4) ----------------------------------------------------------
 
 describe('/preview execute', () => {
-  it('course only → replies with the live module-list embed (ephemeral)', async () => {
+  it('course only → replies with the on-chain module-list embed (ephemeral)', async () => {
     getCourseModules.mockResolvedValue(allModules);
     const interaction = makeChat(CID, null);
 
@@ -335,7 +335,7 @@ describe('/preview execute', () => {
     });
     const embed = embedJson(lastReply(interaction.editReply));
     expect(embed.title).toMatch(/^Preview —/);
-    expect(fieldVal(embed, 'Modules')).toContain('`102`');
+    expect(fieldVal(embed, 'Modules')).toContain('`101`');
   });
 
   it('course + module with a lesson SLT → renders the lesson embed', async () => {
@@ -344,7 +344,7 @@ describe('/preview execute', () => {
       { sltText: 'x', sltIndex: 1, hasLesson: true } as ModuleSlt,
     ]);
     getLesson.mockResolvedValue(mapLesson(lessonFixture));
-    const interaction = makeChat(CID, '102');
+    const interaction = makeChat(CID, '101');
 
     await execute(interaction as never);
 
@@ -359,7 +359,7 @@ describe('/preview execute', () => {
       { sltText: 'x', sltIndex: 1, hasLesson: false } as ModuleSlt,
     ]);
     getAssignment.mockResolvedValue(mapAssignment(assignmentFixture));
-    const interaction = makeChat(CID, '102');
+    const interaction = makeChat(CID, '101');
 
     await execute(interaction as never);
 
@@ -391,9 +391,9 @@ describe('/preview execute', () => {
     expect(lastReply(interaction.editReply).content).toMatch(/try .*preview.* again/i);
   });
 
-  it('no live modules → "no preview available", not an error', async () => {
+  it('no on-chain modules → "no preview available", not an error', async () => {
     getCourseModules.mockResolvedValue(
-      allModules.filter((m) => !m.isLive), // only the draft
+      allModules.filter((m) => !m.onChain), // only the off-chain module (102)
     );
     const interaction = makeChat(CID, null);
 
@@ -402,9 +402,21 @@ describe('/preview execute', () => {
     expect(lastReply(interaction.editReply).content).toMatch(/no preview available/i);
   });
 
-  it('module given but not live / not found → "no preview available"', async () => {
+  it('module given but not found → "no preview available"', async () => {
     getCourseModules.mockResolvedValue(allModules);
     const interaction = makeChat(CID, '999');
+
+    await execute(interaction as never);
+
+    expect(getModuleSlts).not.toHaveBeenCalled();
+    expect(lastReply(interaction.editReply).content).toMatch(/no preview available/i);
+  });
+
+  it('module present in the API response but off-chain (102) → "no preview available"', async () => {
+    // 102 exists in allModules but has no slt_hash → excluded by the execute-level
+    // onChain gate, proving is_live:true does not make it previewable.
+    getCourseModules.mockResolvedValue(allModules);
+    const interaction = makeChat(CID, '102');
 
     await execute(interaction as never);
 
@@ -418,7 +430,7 @@ describe('/preview execute', () => {
       { sltText: 'x', sltIndex: 1, hasLesson: true } as ModuleSlt,
     ]);
     getLesson.mockResolvedValue({ title: '', contentJson: null });
-    const interaction = makeChat(CID, '102');
+    const interaction = makeChat(CID, '101');
 
     await execute(interaction as never);
 
@@ -431,7 +443,7 @@ describe('/preview execute', () => {
       { sltText: 'x', sltIndex: 1, hasLesson: false } as ModuleSlt,
     ]);
     getAssignment.mockResolvedValue({ title: '', contentJson: null });
-    const interaction = makeChat(CID, '102');
+    const interaction = makeChat(CID, '101');
 
     await execute(interaction as never);
 
@@ -441,7 +453,7 @@ describe('/preview execute', () => {
   it('ApiError from getModuleSlts (mid-flow) → friendly retry note', async () => {
     getCourseModules.mockResolvedValue(allModules);
     getModuleSlts.mockRejectedValue(new ApiError('http', '500', 500));
-    const interaction = makeChat(CID, '102');
+    const interaction = makeChat(CID, '101');
 
     await expect(execute(interaction as never)).resolves.toBeUndefined();
     expect(lastReply(interaction.editReply).content).toMatch(/try .*preview.* again/i);
@@ -453,7 +465,7 @@ describe('/preview execute', () => {
       { sltText: 'x', sltIndex: 1, hasLesson: true } as ModuleSlt,
     ]);
     getLesson.mockRejectedValue(new ApiError('network', 'down'));
-    const interaction = makeChat(CID, '102');
+    const interaction = makeChat(CID, '101');
 
     await execute(interaction as never);
     expect(lastReply(interaction.editReply).content).toMatch(/try .*preview.* again/i);
@@ -499,14 +511,14 @@ describe('/preview autocomplete', () => {
     expect(getCourseModules).not.toHaveBeenCalled();
   });
 
-  it('module focused with a chosen course → live-module choices', async () => {
+  it('module focused with a chosen course → on-chain module choices', async () => {
     getCourseModules.mockResolvedValue(allModules);
     const interaction = makeAuto('module', '', CID);
 
     await autocomplete(interaction as never);
 
     expect(interaction.respond).toHaveBeenCalledWith([
-      { name: 'Getting Started with Issuer (102)', value: '102' },
+      { name: 'About Andamio Issuer (101)', value: '101' },
     ]);
   });
 

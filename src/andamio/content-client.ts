@@ -40,7 +40,13 @@ export type { ApiErrorKind };
 export interface CourseModule {
   title: string;
   description: string;
-  isLive: boolean;
+  /**
+   * Whether the module is published / on-chain — derived from a non-empty
+   * top-level `slt_hash` on the entry (its SLTs are on-chain). This is the
+   * canonical "show this module" signal; the nested `content.is_live` flag is
+   * deprecated and must not be used for visibility.
+   */
+  onChain: boolean;
   moduleCode: string;
 }
 
@@ -144,7 +150,8 @@ function unwrap(body: unknown): unknown {
  * Map a modules response into {@link CourseModule}[]. Drops entries with no module
  * code. The live API nests the displayable fields under a per-entry `content`
  * object; we read from there, falling back to the entry itself so a flatter shape
- * still maps.
+ * still maps. The published/on-chain signal (`slt_hash`) is a sibling of
+ * `content` — read it from the entry top level, not from `content`.
  */
 export function mapModules(raw: unknown): CourseModule[] {
   return asArray(unwrap(raw))
@@ -155,7 +162,9 @@ export function mapModules(raw: unknown): CourseModule[] {
       return {
         title: asString(prop(content, 'title')),
         description: asString(prop(content, 'description')),
-        isLive: asBool(prop(content, 'is_live')),
+        // On-chain = a non-empty top-level `slt_hash` (SLTs are on-chain). Read
+        // from the entry, not `content`; `is_live` is deprecated and ignored.
+        onChain: asString(prop(entry, 'slt_hash')) !== '',
         moduleCode,
       };
     })
@@ -313,7 +322,7 @@ function andamioPost(
 
 // --- public read functions (operator X-API-Key only) ---
 
-/** List a course's modules (live + draft; caller filters on `isLive`). */
+/** List a course's modules (published + draft; caller filters on `onChain`). */
 export async function getCourseModules(
   apiBaseUrl: string,
   apiKey: string,

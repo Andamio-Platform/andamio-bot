@@ -26,14 +26,14 @@ import { fitFieldValue } from './embed-field';
 import { loadDisplayFilter } from './display-filter';
 
 /**
- * `/preview` — surface a course's live modules and render a chosen module's
+ * `/preview` — surface a course's modules and render a chosen module's
  * lesson or assignment as an ephemeral embed.
  *
  * Built entirely on the public (operator `X-API-Key` only) content-client reads,
  * so it renders identically for connected and unconnected members and never
  * touches member state. Course selection reuses the curated `course-names`
  * display filter (consistent with `/credentials`, `/available`, `/check`); the
- * module option autocompletes the course's live modules. Every reply is
+ * module option autocompletes the course's on-chain modules. Every reply is
  * ephemeral, and an `ApiError` or empty/degraded content read degrades to a
  * friendly note rather than throwing — mirroring `/faq`'s defensive posture.
  *
@@ -88,7 +88,7 @@ async function withBudget<T>(work: Promise<T>, ms: number): Promise<T> {
 const ERROR_REPLY =
   'Could not reach Andamio right now. Please try `/preview` again shortly.';
 
-/** Shown when there is simply nothing live to preview (not an error). */
+/** Shown when there is nothing on-chain to preview, or the requested module is not found (not an error). */
 const EMPTY_REPLY = 'No preview available for that yet.';
 
 /** Shown when a hand-typed course is not one this server surfaces. */
@@ -124,24 +124,24 @@ export function tiptapExcerpt(contentJson: unknown, maxLen = EXCERPT_MAX): strin
 }
 
 /**
- * Compact list of a course's live modules: one line per module with its title
+ * Compact list of a course's modules: one line per module with its title
  * and code. `fitFieldValue` keeps the field inside Discord's 1024-char limit.
  */
 export function renderModuleListEmbed(
   courseLabel: string,
-  liveModules: CourseModule[],
+  onChainModules: CourseModule[],
 ): EmbedBuilder {
   const embed = new EmbedBuilder()
     .setTitle(clamp(`Preview — ${courseLabel}`, EMBED_TITLE_MAX))
     .setDescription(
-      liveModules.length > 0
-        ? 'Live modules in this course. Re-run `/preview` with a `module` to see ' +
+      onChainModules.length > 0
+        ? 'Modules in this course. Re-run `/preview` with a `module` to see ' +
             'its lesson or assignment.'
-        : 'No live modules to preview in this course yet.',
+        : 'No modules to preview in this course yet.',
     );
 
-  if (liveModules.length > 0) {
-    const lines = liveModules.map((m) => {
+  if (onChainModules.length > 0) {
+    const lines = onChainModules.map((m) => {
       const desc = m.description ? ` — ${m.description}` : '';
       return `• **${m.title || m.moduleCode}** (\`${m.moduleCode}\`)${desc}`;
     });
@@ -229,7 +229,7 @@ export function courseChoices(
 }
 
 /**
- * Build the live-module choices for the `module` autocomplete: live modules only,
+ * Build the module choices for the `module` autocomplete: on-chain modules only,
  * labelled `Title (code)`, valued by module code, narrowed and bounded by
  * {@link narrowChoices}.
  */
@@ -238,7 +238,7 @@ export function moduleChoices(
   focused: string,
 ): { name: string; value: string }[] {
   const choices = modules
-    .filter((m) => m.isLive)
+    .filter((m) => m.onChain)
     .map((m) => ({
       name: `${m.title || m.moduleCode} (${m.moduleCode})`,
       value: m.moduleCode,
@@ -259,7 +259,7 @@ export function isCourseSelectable(
 export const data = new SlashCommandBuilder()
   .setName('preview')
   .setDescription(
-    "Preview a course's live modules and their lesson or assignment content.",
+    "Preview a course's modules and their lesson or assignment content.",
   )
   .addStringOption((option) =>
     option
@@ -281,7 +281,7 @@ export const data = new SlashCommandBuilder()
 /**
  * Autocomplete for both options. `course` returns the curated set with no API
  * call (Discord's ~3s budget). `module` reads the already-chosen `course` and
- * lists its live modules — but only when that course is one the server surfaces
+ * lists its on-chain modules — but only when that course is one the server surfaces
  * (`isCourseSelectable`), so a hand-typed non-curated id cannot enumerate an
  * arbitrary course's modules via the operator key. With no/invalid course, or on
  * any failure, it responds with an empty list — autocomplete must never throw to
@@ -346,23 +346,23 @@ export async function execute(
       config.andamioApiKey,
       courseId,
     );
-    const liveModules = modules.filter((m) => m.isLive);
+    const onChainModules = modules.filter((m) => m.onChain);
     const courseLabel = displayNameFor(courseId, filter.names);
 
     // Module-list view: no module chosen.
     if (!moduleCode) {
-      if (liveModules.length === 0) {
+      if (onChainModules.length === 0) {
         await interaction.editReply({ content: EMPTY_REPLY });
         return;
       }
       await interaction.editReply({
-        embeds: [renderModuleListEmbed(courseLabel, liveModules)],
+        embeds: [renderModuleListEmbed(courseLabel, onChainModules)],
       });
       return;
     }
 
-    // Per-module view: the module must be live to preview.
-    const module = liveModules.find((m) => m.moduleCode === moduleCode);
+    // Per-module view: the module must be on-chain to preview.
+    const module = onChainModules.find((m) => m.moduleCode === moduleCode);
     if (!module) {
       await interaction.editReply({ content: EMPTY_REPLY });
       return;
