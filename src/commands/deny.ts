@@ -1,6 +1,8 @@
 import {
   ChatInputCommandInteraction,
   MessageFlags,
+  OverwriteType,
+  PermissionFlagsBits,
   SlashCommandBuilder,
 } from 'discord.js';
 
@@ -9,6 +11,7 @@ import { getDb } from '../db/handle';
 import { loadMappings } from '../gating/mappings';
 import { reevaluateMember, type ReevaluationOutcome } from '../gating/triggers';
 import { upsertDenial, FULL_BLOCK } from '../db/denials';
+import { gatingRolesForChannel, type ChannelOverwrite } from '../gating/channel-roles';
 import { requireModerator } from './mod-auth';
 
 /**
@@ -66,6 +69,13 @@ export const data = new SlashCommandBuilder()
       .setName('role')
       .setDescription('The gated role to withhold (omit to block all gated roles)'),
   )
+  .addChannelOption((o) =>
+    o
+      .setName('channel')
+      .setDescription(
+        'Block them from this channel — I’ll find the role(s) that gate it',
+      ),
+  )
   .addStringOption((o) =>
     o.setName('reason').setDescription('Why (shown in the /denials audit list)'),
   );
@@ -78,11 +88,25 @@ export async function execute(
 
   const target = interaction.options.getUser('member', true);
   const role = interaction.options.getRole('role');
+  const channel = interaction.options.getChannel('channel');
   const reason = interaction.options.getString('reason');
+
+  // The three addressing modes are mutually exclusive in intent. A channel AND a
+  // role together is ambiguous, so reject rather than guess — checked before the
+  // config load so a transient config blip can't mask a usage error.
+  if (channel && role) {
+    await interaction.reply({
+      content:
+        'Pick one — a channel or a role, not both. Use `channel` to block ' +
+        'every role that gates it, or `role` to block a specific role.',
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
 
   // A per-role denial must name a role this server actually gates on, else it
   // would be a no-op the sweep never enforces. Loading mappings also lets a full
-  // block fail safe if config is broken.
+  // block fail safe if config is broken, and feeds the channel→roles resolver.
   let managedRoleIds: ReadonlySet<string>;
   try {
     managedRoleIds = loadMappings(config.roleMappingsPath).managedRoleIds;
@@ -92,6 +116,50 @@ export async function execute(
       content:
         'Could not load this server’s role config right now. Please try ' +
         '`/deny` again shortly.',
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+
+  const reasonLine = reason ? `\nReason: ${reason}` : '';
+
+  // Channel mode: resolve the managed role(s) that gate the channel (allow
+  // ViewChannel ∧ managed) and deny each. A snapshot of today's gating roles.
+  if (channel) {
+    const overwrites: ChannelOverwrite[] =
+      'permissionOverwrites' in channel
+        ? channel.permissionOverwrites.cache.map((ow) => ({
+            id: ow.id,
+            type: ow.type === OverwriteType.Role ? 'role' : 'member',
+            allowsView: ow.allow.has(PermissionFlagsBits.ViewChannel),
+          }))
+        : [];
+    const roleIds = gatingRolesForChannel(overwrites, managedRoleIds);
+
+    if (roleIds.length === 0) {
+      await interaction.reply({
+        content:
+          `<#${channel.id}> isn’t gated by any role I manage, so there’s ` +
+          'nothing to block. Use `/deny @member role:@role` if you mean a ' +
+          'specific role.',
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    const db = getDb();
+    for (const id of roleIds) {
+      upsertDenial(db, target.id, id, reason, interaction.user.id);
+    }
+    // One re-evaluation after writing every row — the sweep applies them together.
+    const outcome = await reevaluateMember(target.id);
+
+    const scope = roleIds.map((id) => `<@&${id}>`).join(', ');
+    const removeFailed = roleIds.some((id) => outcome.failed.includes(id));
+    const lead = denyOutcomeLead(outcome, scope, removeFailed, target.id);
+
+    await interaction.reply({
+      content: `${lead}${reasonLine}`,
       flags: MessageFlags.Ephemeral,
     });
     return;
@@ -119,7 +187,6 @@ export async function execute(
   const outcome = await reevaluateMember(target.id);
 
   const scope = role ? `<@&${role.id}>` : '**all gated roles**';
-  const reasonLine = reason ? `\nReason: ${reason}` : '';
 
   // The denial row is always written; whether the live role dropped depends on
   // the member's state. `denyOutcomeLead` reports that honestly.
