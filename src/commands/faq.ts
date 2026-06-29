@@ -1,21 +1,31 @@
 import {
+  AutocompleteInteraction,
   ChatInputCommandInteraction,
   EmbedBuilder,
   MessageFlags,
   SlashCommandBuilder,
 } from 'discord.js';
 
-import { loadConfig } from '../config';
+import { loadConfig, type Config } from '../config';
 import {
   loadCourseDisplayNames,
   type CourseDisplayNames,
 } from '../andamio/course-names';
 import { loadMappings, type Mappings } from '../gating/mappings';
+import { loadFaq, type FaqEntry } from '../faq/config';
+import { rankFaqEntries, resolveAnswer } from '../faq/match';
 import { gatedCredentials } from './gating-view';
 
 export const data = new SlashCommandBuilder()
   .setName('faq')
-  .setDescription('How to get started: connect your Andamio account and unlock channels.');
+  .setDescription('How to get started: connect your Andamio account and unlock channels.')
+  .addStringOption((option) =>
+    option
+      .setName('question')
+      .setDescription('Search the FAQ — start typing to pick a question (optional).')
+      .setRequired(false)
+      .setAutocomplete(true),
+  );
 
 /** The get-started steps. Stable copy, keyed to the bot's existing commands. */
 const STEPS: { name: string; value: string }[] = [
@@ -74,21 +84,87 @@ export function renderFaqEmbed(
   return embed;
 }
 
-export async function execute(
-  interaction: ChatInputCommandInteraction,
-): Promise<void> {
-  const config = loadConfig();
+/**
+ * Build the static get-started guide embed from local config only. Factored out
+ * of `execute` so both the no-question path and the unknown-question fallback
+ * render the identical guide. The role-mappings enrichment is best-effort: if
+ * the config can't be read, ship the steps rather than error.
+ */
+function renderStaticGuide(config: Config): EmbedBuilder {
   const names = loadCourseDisplayNames();
-
-  // The guide is local-only. The catalog enrichment is best-effort: if the
-  // role-mappings config can't be read, still ship the steps rather than error.
   let mappings: Mappings | undefined;
   try {
     mappings = loadMappings(config.roleMappingsPath);
   } catch (err) {
     console.error('/faq: could not load role-mappings, showing steps only:', err);
   }
+  return renderFaqEmbed(mappings, names);
+}
 
-  const embed = renderFaqEmbed(mappings, names);
-  await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+/** Render a single Q&A entry's answer as an embed (Discord markdown ok). */
+export function renderAnswerEmbed(entry: FaqEntry): EmbedBuilder {
+  return new EmbedBuilder().setTitle(entry.question).setDescription(entry.answer);
+}
+
+/**
+ * Autocomplete handler for the `question` option. Loads the FAQ config and
+ * returns up to 25 ranked choices. Config-read failures degrade to an empty
+ * list — autocomplete must never throw to Discord (the dispatcher in index.ts
+ * also guards this, but the handler stays graceful on its own).
+ */
+export async function autocomplete(
+  interaction: AutocompleteInteraction,
+): Promise<void> {
+  let entries: FaqEntry[] = [];
+  try {
+    entries = loadFaq(loadConfig().faqPath);
+  } catch (err) {
+    console.error('/faq autocomplete: could not load FAQ config:', err);
+    await interaction.respond([]);
+    return;
+  }
+
+  const focused = interaction.options.getFocused();
+  await interaction.respond(rankFaqEntries(entries, focused));
+}
+
+export async function execute(
+  interaction: ChatInputCommandInteraction,
+): Promise<void> {
+  const config = loadConfig();
+  const id = interaction.options.getString('question');
+
+  // No question → the static get-started guide, byte-for-byte as before.
+  if (!id) {
+    await interaction.reply({
+      embeds: [renderStaticGuide(config)],
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+
+  // Q&A path. Best-effort: a config read failure falls back to the guide rather
+  // than erroring to the member (matches the role-mappings posture above).
+  let entry: FaqEntry | undefined;
+  try {
+    entry = resolveAnswer(loadFaq(config.faqPath), id);
+  } catch (err) {
+    console.error('/faq: could not load FAQ config, showing the guide:', err);
+  }
+
+  if (entry) {
+    await interaction.reply({
+      embeds: [renderAnswerEmbed(entry)],
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+
+  // Unknown id (or the config failed to load): a friendly note + the guide.
+  await interaction.reply({
+    content:
+      "I don't have an answer for that one yet — here's the get-started guide instead.",
+    embeds: [renderStaticGuide(config)],
+    flags: MessageFlags.Ephemeral,
+  });
 }

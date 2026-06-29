@@ -13,6 +13,7 @@ vi.mock('../config', () => ({
     appLoginBaseUrl: 'https://app.test',
     botCallbackBaseUrl: 'https://bot.test',
     roleMappingsPath: '/tmp/role-mappings.json',
+    faqPath: '/tmp/faq.json',
   }),
 }));
 
@@ -28,17 +29,63 @@ vi.mock('../andamio/course-names', async (importOriginal) => {
   return { ...actual, loadCourseDisplayNames: () => ({}) };
 });
 
-import { execute } from './faq';
+const loadFaq = vi.fn<[], FaqEntry[]>();
+vi.mock('../faq/config', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../faq/config')>();
+  return { ...actual, loadFaq: () => loadFaq() };
+});
+
+import { autocomplete, execute, renderAnswerEmbed } from './faq';
+import type { FaqEntry } from '../faq/config';
 
 // --- helpers ---------------------------------------------------------------
 
 interface FakeInteraction {
   user: { id: string };
   reply: Mock;
+  options: { getString: Mock };
 }
-function makeInteraction(discordId = 'discord-1'): FakeInteraction {
-  return { user: { id: discordId }, reply: vi.fn().mockResolvedValue(undefined) };
+/**
+ * A chat-input interaction stand-in. `question` is the value `getString('question')`
+ * returns — `null` (the default) drives the no-argument static-guide path.
+ */
+function makeInteraction(
+  discordId = 'discord-1',
+  question: string | null = null,
+): FakeInteraction {
+  return {
+    user: { id: discordId },
+    reply: vi.fn().mockResolvedValue(undefined),
+    options: { getString: vi.fn().mockReturnValue(question) },
+  };
 }
+
+interface FakeAutocomplete {
+  commandName: string;
+  options: { getFocused: Mock };
+  respond: Mock;
+}
+function makeAutocomplete(focused = ''): FakeAutocomplete {
+  return {
+    commandName: 'faq',
+    options: { getFocused: vi.fn().mockReturnValue(focused) },
+    respond: vi.fn().mockResolvedValue(undefined),
+  };
+}
+
+const faqEntries: FaqEntry[] = [
+  {
+    id: 'connect-account',
+    question: 'How do I connect my account?',
+    answer: 'Run `/login` to connect.',
+    aliases: ['login'],
+  },
+  {
+    id: 'cant-see-channel',
+    question: "Why can't I see a channel?",
+    answer: 'Run `/check`, then `/available`.',
+  },
+];
 
 const issuerRule: MappingRule = {
   type: 'credential',
@@ -67,6 +114,8 @@ const stepValues = (embed: { fields?: { name: string; value: string }[] }) =>
 beforeEach(() => {
   loadMappings.mockReset();
   loadMappings.mockReturnValue(mappingsOf([issuerRule]));
+  loadFaq.mockReset();
+  loadFaq.mockReturnValue(faqEntries);
 });
 
 // --- renderFaqEmbed --------------------------------------------------------
@@ -158,5 +207,107 @@ describe('/faq execute', () => {
     const embed = interaction.reply.mock.calls[0][0].embeds[0].toJSON();
     expect(fieldNames(embed)).not.toContain('What this server unlocks');
     expect(stepValues(embed)[0]).toMatch(/\/login/);
+  });
+
+  it('no question → static guide; never reads the FAQ config', async () => {
+    const interaction = makeInteraction();
+
+    await execute(interaction as never);
+
+    // The static floor must not depend on the Q&A config at all.
+    expect(loadFaq).not.toHaveBeenCalled();
+    const payload = interaction.reply.mock.calls[0][0];
+    expect(payload.content).toBeUndefined();
+    expect(stepValues(payload.embeds[0].toJSON())[0]).toMatch(/\/login/);
+  });
+
+  it('known question id → renders that answer embed, ephemeral', async () => {
+    const interaction = makeInteraction('discord-1', 'cant-see-channel');
+
+    await execute(interaction as never);
+
+    const payload = interaction.reply.mock.calls[0][0];
+    expect(payload.flags).toBe(MessageFlags.Ephemeral);
+    const embed = payload.embeds[0].toJSON();
+    expect(embed.title).toBe("Why can't I see a channel?");
+    expect(embed.description).toMatch(/\/check/);
+    // It's the answer, not the get-started guide.
+    expect(stepValues(embed)).toHaveLength(0);
+  });
+
+  it('unknown question id → friendly note + the static guide, ephemeral', async () => {
+    const interaction = makeInteraction('discord-1', 'no-such-id');
+
+    await execute(interaction as never);
+
+    const payload = interaction.reply.mock.calls[0][0];
+    expect(payload.flags).toBe(MessageFlags.Ephemeral);
+    expect(payload.content).toMatch(/don't have an answer/i);
+    expect(stepValues(payload.embeds[0].toJSON())[0]).toMatch(/\/login/);
+  });
+
+  it('FAQ config fails to load on an id lookup → static guide, no error to the user', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    loadFaq.mockImplementation(() => {
+      throw new Error('malformed faq.json');
+    });
+    const interaction = makeInteraction('discord-1', 'connect-account');
+
+    await execute(interaction as never);
+
+    const payload = interaction.reply.mock.calls[0][0];
+    // Falls back to the friendly note + guide rather than throwing.
+    expect(payload.content).toMatch(/don't have an answer/i);
+    expect(stepValues(payload.embeds[0].toJSON())[0]).toMatch(/\/login/);
+  });
+});
+
+// --- renderAnswerEmbed -----------------------------------------------------
+
+describe('renderAnswerEmbed', () => {
+  it('uses the question as title and the answer as description', () => {
+    const embed = renderAnswerEmbed(faqEntries[0]).toJSON();
+    expect(embed.title).toBe('How do I connect my account?');
+    expect(embed.description).toBe('Run `/login` to connect.');
+  });
+});
+
+// --- autocomplete() --------------------------------------------------------
+
+describe('/faq autocomplete', () => {
+  it('responds with ranked choices for the focused query', async () => {
+    const interaction = makeAutocomplete('connect');
+
+    await autocomplete(interaction as never);
+
+    expect(interaction.respond).toHaveBeenCalledTimes(1);
+    const choices = interaction.respond.mock.calls[0][0];
+    expect(choices).toEqual([
+      { name: 'How do I connect my account?', value: 'connect-account' },
+    ]);
+  });
+
+  it('empty focused query → all entries (capped), as {name,value}', async () => {
+    const interaction = makeAutocomplete('');
+
+    await autocomplete(interaction as never);
+
+    const choices = interaction.respond.mock.calls[0][0];
+    expect(choices).toHaveLength(2);
+    expect(choices[0]).toEqual({
+      name: 'How do I connect my account?',
+      value: 'connect-account',
+    });
+  });
+
+  it('FAQ config fails to load → responds with an empty list, never throws', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    loadFaq.mockImplementation(() => {
+      throw new Error('malformed faq.json');
+    });
+    const interaction = makeAutocomplete('connect');
+
+    await expect(autocomplete(interaction as never)).resolves.toBeUndefined();
+    expect(interaction.respond).toHaveBeenCalledWith([]);
   });
 });
