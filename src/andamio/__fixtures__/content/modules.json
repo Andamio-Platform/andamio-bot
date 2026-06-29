@@ -1,23 +1,36 @@
-[
-  {
-    "title": "Getting Started",
-    "description": "Orientation to the course and how to navigate it.",
-    "image_url": "https://cdn.andamio.io/courses/intro/module-101.png",
-    "is_live": true,
-    "course_module_code": "101"
-  },
-  {
-    "title": "Core Concepts",
-    "description": "The foundational ideas you will build on.",
-    "image_url": "https://cdn.andamio.io/courses/intro/module-102.png",
-    "is_live": true,
-    "course_module_code": "102"
-  },
-  {
-    "title": "Draft Module (not yet published)",
-    "description": "Work in progress — should be filtered out by is_live.",
-    "image_url": "",
-    "is_live": false,
-    "course_module_code": "103"
-  }
-]
+{
+  "data": [
+    {
+      "slt_hash": "e9b5343186f83ed804a9fd87293a7378e3b237743b76d56da73b111d855631db",
+      "course_id": "ae192632aabe00ed2042eaef596bc15f3887fa32e75e8f9b8fa516df",
+      "created_by": "james",
+      "on_chain_slts": [
+        "I can explain how the Andamio Issuer product differs from the Andamio API.",
+        "I can identify the target market for the Andamio Issuer product.",
+        "I can find the documentation and resources that support Andamio Issuer."
+      ],
+      "content": {
+        "course_module_code": "101",
+        "title": "About Andamio Issuer",
+        "description": "Introducing the new Andamio Issuer product.",
+        "is_live": false
+      },
+      "source": "merged"
+    },
+    {
+      "slt_hash": "f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8",
+      "course_id": "ae192632aabe00ed2042eaef596bc15f3887fa32e75e8f9b8fa516df",
+      "created_by": "james",
+      "on_chain_slts": [
+        "I can set up an Andamio Issuer course."
+      ],
+      "content": {
+        "course_module_code": "102",
+        "title": "Getting Started with Issuer",
+        "description": "A live module, included so tests exercise the is_live filter.",
+        "is_live": true
+      },
+      "source": "merged"
+    }
+  ]
+}

@@ -1,23 +1,41 @@
 # Content API fixtures
 
 These JSON files are **representative response bodies** for the five `content-client.ts`
-endpoints, used to pin the pure mappers in `content-client.test.ts`.
+endpoints, used to pin the pure mappers in `content-client.test.ts` and the `/preview`
+render/selection tests in `src/commands/preview.test.ts`.
 
-## Shape status: UNCONFIRMED (source-mapped)
+## Shape status: LIVE-CONFIRMED (mainnet, 2026-06-29)
 
-The field names and structure here are **source-mapped from the origin handoff**
-(`docs/plans/2026-06-28-001-feat-content-progress-opportunities-channel-block-handoff.md`,
-"API capability" table), **not** captured from a live API response. A live capture
-against `preprod.api.andamio.io` was attempted during the build but the available
-operator key returned HTTP 401 on both preprod and production, and no member JWT was
-available for the authenticated commitments endpoint.
+The four public fixtures (`modules`, `slts`, `lesson`, `assignment`) were captured
+from the **live mainnet API** (`https://api.andamio.io`) using the bot's operator
+`X-API-Key`, against the server's gated course
+`ae192632aabe00ed2042eaef596bc15f3887fa32e75e8f9b8fa516df`, module `101`. The
+original `preprod` validation target in the #21 handoff was wrong — the bot runs on
+mainnet — which is what caused the earlier 401s.
 
-**Action when a valid preprod operator key (and a test member JWT) become available:**
-capture each endpoint's real body, overwrite the matching fixture, and adjust the
-mapper only if the real field names differ. Because the mappers are written to be
-**total and envelope-agnostic** (they tolerate a `{ "data": ... }` wrapper OR a bare
-body, coerce types defensively, and never throw on shape), a drift surfaces as a
-fixture+mapper tweak, never a crash — see KTD5/KTD7 in the PR plan.
+**The live shapes differ materially from the original source-mapped guess.** The
+fixtures and mappers were reconciled to the confirmed shapes:
+
+| Endpoint | Original source-mapped guess | Live (confirmed) |
+|---|---|---|
+| modules | bare array; flat `title, description, image_url, is_live, course_module_code` | `{ "data": [ … ] }`; displayable fields nested under a per-entry `content` object; **no image url**; entries also carry `slt_hash, course_id, created_by, on_chain_slts, source` |
+| slts | bare array of `{ slt_text, slt_index, has_lesson }` | `{ "data": { …, "slts": [ … ] } }`; each SLT additionally embeds a `lesson` object (ignored by `mapSlts`) |
+| lesson | `{ title, description, image_url, video_url, content_json }` | `{ "data": { …, "content": { "title", "content_json" } } }` — **only title + content_json** |
+| assignment | same as lesson | `{ "data": { …, "content": { "title", "content_json" } } }` — **only title + content_json** |
+
+Because the mappers are **total and envelope-agnostic** (they tolerate a
+`{ "data": … }` wrapper, dig through the nesting, coerce types defensively, and never
+throw on shape), the drift surfaced as a fixture + mapper reconciliation, not a crash.
+
+The fixtures are trimmed for size: `content_json` documents are shortened to a couple
+of paragraphs (enough to exercise the excerpt walker), and `modules.json` adds one
+representative `is_live: true` module (`102`) alongside the real `101` (`is_live:
+false`) so the live-filter logic has both cases to test against. No secrets or member
+PII appear in any fixture.
+
+`commitments.json` remains **source-mapped, not yet live-confirmed** — its endpoint
+(`POST …/assignment-commitments/list`) is authenticated and requires a member JWT,
+which `/preview` does not use. Confirm it when `/progress` (PR 3) is built.
 
 ## Files
 
@@ -29,7 +47,6 @@ fixture+mapper tweak, never a crash — see KTD5/KTD7 in the PR plan.
 | `assignment.json` | `GET /api/v2/course/user/assignment/{course_id}/{course_module_code}` | X-API-Key |
 | `commitments.json` | `POST /api/v2/course/student/assignment-commitments/list` | X-API-Key + Bearer |
 
-These bodies are written **bare** (no `data` envelope) to document the source-mapped
-shape directly. The mapper tests additionally feed an enveloped variant of each to
-prove the `data`-unwrap path, so whichever shape the real API uses is covered.
-No secrets or real member PII appear in any fixture.
+The public fixtures are written **enveloped** (`{ "data": … }`) to match the live
+responses. The mapper tests additionally feed a bare (un-enveloped) variant of each
+to prove the unwrap path stays tolerant of either.
