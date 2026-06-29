@@ -19,8 +19,19 @@ import { initGating, reevaluateAll, reevaluateMember } from './gating/triggers';
 import { startCallbackServer } from './web/server';
 import { isCommandModule } from './command-loader';
 import { registerGuildCommands } from './discord/register';
+import {
+  handleAutocomplete,
+  type AutocompleteCapable,
+} from './discord/autocomplete';
 
-interface Command {
+/**
+ * A loadable command. `data` + `execute` are required; the optional
+ * `autocomplete` handler is inherited from {@link AutocompleteCapable} so the
+ * dispatcher and the interface share one source of truth for its signature.
+ * Commands without `autocomplete` are unaffected — the loader still only
+ * requires `data` + `execute`.
+ */
+interface Command extends AutocompleteCapable {
   data: {
     name: string;
     toJSON(): RESTPostAPIApplicationCommandsJSONBody;
@@ -144,6 +155,16 @@ function main(): void {
   });
 
   client.on(Events.InteractionCreate, async (interaction) => {
+    // Autocomplete is its own interaction type; route it to the command's
+    // optional handler before the chat-input check (which would drop it).
+    if (interaction.isAutocomplete()) {
+      await handleAutocomplete(
+        client.commands.get(interaction.commandName),
+        interaction,
+      );
+      return;
+    }
+
     if (!interaction.isChatInputCommand()) return;
 
     const command = client.commands.get(interaction.commandName);

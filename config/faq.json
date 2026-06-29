@@ -1,0 +1,26 @@
+[
+  {
+    "id": "connect-account",
+    "question": "How do I connect my Andamio account?",
+    "answer": "Run `/login` and follow the link to connect your Andamio account to this Discord. Once connected, the bot reads your credentials and grants the roles you've earned. You only need to do this once.",
+    "aliases": ["login", "sign in", "link account", "get started", "connect"]
+  },
+  {
+    "id": "cant-see-channel",
+    "question": "Why can't I see a channel?",
+    "answer": "Channels here are unlocked by Andamio credentials. Run `/check` to re-read your credentials live and update your roles right away, then `/available` to see which credentials gate which channels. If a channel is still hidden, you don't yet hold the credential it requires — `/available` shows how to earn it.",
+    "aliases": ["locked channel", "missing channel", "hidden channel", "access", "can't see"]
+  },
+  {
+    "id": "see-credentials",
+    "question": "How do I see the credentials I hold?",
+    "answer": "Run `/credentials` to list the Andamio credentials on your connected account. It reads live from Andamio, so it always reflects what you currently hold.",
+    "aliases": ["my credentials", "what do I have", "inventory", "achievements"]
+  },
+  {
+    "id": "refresh-roles",
+    "question": "I earned something new — how do I update my roles?",
+    "answer": "Run `/check`. It re-reads your credentials from Andamio and updates your channel roles immediately, so you don't have to wait for the periodic sync or log in again.",
+    "aliases": ["refresh", "update roles", "new credential", "resync", "sync"]
+  }
+]

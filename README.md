@@ -40,7 +40,7 @@ Other guides: [deploy anywhere](./docs/DEPLOY.md) ·
 | `/credentials` | Shows the member the Andamio credentials they have earned (ephemeral). Personal inventory only. Curated by `COURSE_DISPLAY_NAMES` (see Curated display below). |
 | `/available` | Lists the credentials this server gates channels on, each marked held or not, with a link to earn the ones they lack. Works before connecting. |
 | `/check` | Re-reads the member's credentials live, updates their roles, and reports which gated credentials they hold and still need. One command to refresh roles and see where you stand. |
-| `/faq` | Shows a get-started guide (connect, see what you hold, check access, browse what unlocks channels), plus a config-built list of what this server gates on. Local-only — renders identically before connecting and when Andamio is down. |
+| `/faq` | With no argument, shows a get-started guide (connect, see what you hold, check access, browse what unlocks channels), plus a config-built list of what this server gates on. With `question:<…>` it answers a Q&A entry, offering **autocomplete** over the questions in `FAQ_PATH` (default `config/faq.json`; see `config/faq.example.json`). Local-only — renders identically before connecting and when Andamio is down; an unknown question or missing config falls back to the guide. |
 
 ## Moderator commands (deny-list)
 

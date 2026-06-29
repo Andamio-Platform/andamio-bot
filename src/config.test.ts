@@ -30,6 +30,27 @@ describe('loadConfig', () => {
     expect(config.dbPath).toBe('./data/bot.sqlite');
   });
 
+  it('FAQ_PATH is optional: defaults to config/faq.json when unset', () => {
+    expect(loadConfig(validEnv()).faqPath).toBe('config/faq.json');
+  });
+
+  it('FAQ_PATH overrides the default when set, trimming whitespace', () => {
+    const env = validEnv();
+    env.FAQ_PATH = '  /custom/faq.json  ';
+    expect(loadConfig(env).faqPath).toBe('/custom/faq.json');
+  });
+
+  it('FAQ_PATH blank/whitespace → falls back to the default', () => {
+    const env = validEnv();
+    env.FAQ_PATH = '   ';
+    expect(loadConfig(env).faqPath).toBe('config/faq.json');
+  });
+
+  it('FAQ_PATH is not required: a valid env without it still loads', () => {
+    const env = validEnv();
+    expect(() => loadConfig(env)).not.toThrow();
+  });
+
   it('MOD_ROLE_ID is optional: undefined when unset, value when set', () => {
     expect(loadConfig(validEnv()).modRoleId).toBeUndefined();
     const env = validEnv();
