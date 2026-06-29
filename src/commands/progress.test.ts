@@ -255,6 +255,13 @@ describe('autocomplete', () => {
     ]);
   });
 
+  it('responds with [] for a non-course focused option, no dashboard read', async () => {
+    const auto = makeAuto('', 'view');
+    await autocomplete(auto as never);
+    expect(auto.respond).toHaveBeenCalledWith([]);
+    expect(getUserDashboard).not.toHaveBeenCalled();
+  });
+
   it('responds with [] and makes no dashboard read when not connected', async () => {
     getLinkByDiscordId.mockReturnValue(null);
     const auto = makeAuto('');
@@ -301,7 +308,19 @@ describe('execute — reconnect gate', () => {
     expect(buildReloginPrompt).toHaveBeenCalledWith(
       expect.anything(), 'discord-1', 'https://app.test', 'https://bot.test', 'expired',
     );
+    expect(lastReply(chat.reply).flags).toBe(MessageFlags.Ephemeral);
     expect(getCourseModules).not.toHaveBeenCalled();
+  });
+
+  it('shows the connect prompt when the link exists but has no usable JWT', async () => {
+    getLinkByDiscordId.mockReturnValue(linkedJwt({ user_jwt: null }));
+    const chat = makeChat(CID);
+    await execute(chat as never);
+    expect(buildReloginPrompt).toHaveBeenCalledWith(
+      expect.anything(), 'discord-1', 'https://app.test', 'https://bot.test', 'connect',
+    );
+    expect(getCourseModules).not.toHaveBeenCalled();
+    expect(getAssignmentCommitments).not.toHaveBeenCalled();
   });
 });
 
@@ -327,7 +346,9 @@ describe('execute — progress views', () => {
     getAssignmentCommitments.mockResolvedValue([
       commit('101', 'ACCEPTED'),
       commit('103', 'ACCEPTED'), // off-chain module → excluded from the join
-      commit('201', 'ACCEPTED', OTHER), // other course → filtered out (KTD5)
+      // Other course, SAME module code as on-chain 102: without the courseId
+      // scope filter this would wrongly mark 102 ACCEPTED. It must stay NONE.
+      commit('102', 'ACCEPTED', OTHER),
     ]);
     const chat = makeChat(CID);
     await execute(chat as never);
@@ -388,7 +409,9 @@ describe('execute — graceful errors', () => {
     getAssignmentCommitments.mockResolvedValue([]);
     const chat = makeChat(CID);
     await execute(chat as never);
-    expect(lastReply(chat.editReply).content).toMatch(/try .*again shortly/i);
+    // Pin ERROR_REPLY distinctively — VERIFY_REPLY shares the "again shortly"
+    // tail, so match the unique "could not reach" lead instead.
+    expect(lastReply(chat.editReply).content).toMatch(/could not reach andamio/i);
   });
 
   it('logs and recovers from an unexpected (non-ApiError) throw', async () => {

@@ -59,6 +59,9 @@ const CHOICE_LIMIT = 25;
 /** Discord caps an autocomplete choice `name` at 100 characters. */
 const CHOICE_NAME_MAX = 100;
 
+/** Discord caps an embed title at 256 characters. */
+const EMBED_TITLE_MAX = 256;
+
 /** Shown when a content/commitments read errors. */
 const ERROR_REPLY =
   'Could not reach Andamio right now. Please try `/progress` again shortly.';
@@ -120,7 +123,7 @@ export function renderProgressEmbed(
 ): EmbedBuilder {
   const opportunities = selectOpportunities(rows);
   const embed = new EmbedBuilder()
-    .setTitle(clamp(`Progress — ${courseLabel}`, 256))
+    .setTitle(clamp(`Progress — ${courseLabel}`, EMBED_TITLE_MAX))
     .setDescription(
       `Your status across ${rows.length} module${rows.length === 1 ? '' : 's'}.` +
         (opportunities.length > 0
@@ -138,7 +141,7 @@ export function renderOpportunitiesEmbed(
 ): EmbedBuilder {
   const opportunities = selectOpportunities(rows);
   return new EmbedBuilder()
-    .setTitle(clamp(`Opportunities — ${courseLabel}`, 256))
+    .setTitle(clamp(`Opportunities — ${courseLabel}`, EMBED_TITLE_MAX))
     .setDescription(
       `${opportunities.length} open assignment${opportunities.length === 1 ? '' : 's'} ` +
         'to start in this course.',
