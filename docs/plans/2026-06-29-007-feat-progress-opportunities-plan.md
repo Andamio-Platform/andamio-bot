@@ -1,6 +1,6 @@
 ---
 type: plan
-status: active
+status: completed
 created: 2026-06-29
 origin: docs/plans/2026-06-29-004-feat-progress-opportunities-handoff.md
 target_repo: andamio-bot
