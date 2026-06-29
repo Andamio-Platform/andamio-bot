@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 import {
+  AutocompleteInteraction,
   ChatInputCommandInteraction,
   Client,
   ClientOptions,
@@ -19,6 +20,7 @@ import { initGating, reevaluateAll, reevaluateMember } from './gating/triggers';
 import { startCallbackServer } from './web/server';
 import { isCommandModule } from './command-loader';
 import { registerGuildCommands } from './discord/register';
+import { handleAutocomplete } from './discord/autocomplete';
 
 interface Command {
   data: {
@@ -26,6 +28,13 @@ interface Command {
     toJSON(): RESTPostAPIApplicationCommandsJSONBody;
   };
   execute: (interaction: ChatInputCommandInteraction) => Promise<void>;
+  /**
+   * Optional per-command autocomplete handler. Commands that declare a slash
+   * option with `.setAutocomplete(true)` export this to populate the choices;
+   * commands without it are unaffected (the loader still only requires
+   * `data` + `execute`). Dispatched generically by `handleAutocomplete`.
+   */
+  autocomplete?: (interaction: AutocompleteInteraction) => Promise<void>;
 }
 
 class BotClient extends Client {
@@ -144,6 +153,16 @@ function main(): void {
   });
 
   client.on(Events.InteractionCreate, async (interaction) => {
+    // Autocomplete is its own interaction type; route it to the command's
+    // optional handler before the chat-input check (which would drop it).
+    if (interaction.isAutocomplete()) {
+      await handleAutocomplete(
+        client.commands.get(interaction.commandName),
+        interaction,
+      );
+      return;
+    }
+
     if (!interaction.isChatInputCommand()) return;
 
     const command = client.commands.get(interaction.commandName);
