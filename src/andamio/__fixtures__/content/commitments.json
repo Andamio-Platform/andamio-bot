@@ -1,17 +1,36 @@
-[
-  {
-    "course_id": "ae192632aabe00ed2042eaef596bc15f3887fa32e75e8f9b8fa516df",
-    "course_module_code": "101",
-    "status": "APPROVED"
-  },
-  {
-    "course_id": "ae192632aabe00ed2042eaef596bc15f3887fa32e75e8f9b8fa516df",
-    "course_module_code": "102",
-    "status": "SUBMITTED"
-  },
-  {
-    "course_id": "ae192632aabe00ed2042eaef596bc15f3887fa32e75e8f9b8fa516df",
-    "course_module_code": "104",
-    "status": "REFUSED"
-  }
-]
+{
+  "data": [
+    {
+      "slt_hash": "aaaa1111bbbb2222cccc3333dddd4444eeee5555ffff6666aaaa7777bbbb8888",
+      "course_id": "ae192632aabe00ed2042eaef596bc15f3887fa32e75e8f9b8fa516df",
+      "course_module_code": "101",
+      "on_chain_status": "completed",
+      "on_chain_content": "6262626262626262626262626262626262626262626262626262626262626262",
+      "content": {
+        "evidence": {
+          "type": "doc",
+          "content": [
+            {
+              "type": "paragraph",
+              "content": [{ "type": "text", "text": "Sample evidence." }]
+            }
+          ]
+        },
+        "assignment_evidence_hash": "6262626262626262626262626262626262626262626262626262626262626262",
+        "commitment_status": "ACCEPTED"
+      },
+      "source": "merged"
+    },
+    {
+      "slt_hash": "1111aaaa2222bbbb3333cccc4444dddd5555eeee6666ffff7777aaaa8888bbbb",
+      "course_id": "ae192632aabe00ed2042eaef596bc15f3887fa32e75e8f9b8fa516df",
+      "course_module_code": "102",
+      "on_chain_status": "pending",
+      "content": {
+        "evidence": { "type": "doc", "content": [] },
+        "commitment_status": "CREDENTIAL_CLAIMED"
+      },
+      "source": "db_only"
+    }
+  ]
+}
