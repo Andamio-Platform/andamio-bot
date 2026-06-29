@@ -316,4 +316,33 @@ describe('/deny #channel', () => {
     expect(i.reply.mock.calls[0][0].content).toMatch(/could not load/i);
     expect(upsertDenial).not.toHaveBeenCalled();
   });
+
+  it('channel path, member not reachable (skipped) → recorded-not-applied, not success', async () => {
+    reevaluateMember.mockResolvedValue({ status: 'skipped', failed: [] });
+    const i = makeInteraction({
+      channel: fakeChannel([fakeOverwrite('r1', OverwriteType.Role, true)]),
+    });
+
+    await execute(i as never);
+
+    // Row still written; the channel-scope wording must not claim it is live.
+    expect(upsertDenial).toHaveBeenCalledWith({}, 'target-1', 'r1', null, 'mod-1');
+    const content = i.reply.mock.calls[0][0].content;
+    expect(content).toMatch(/next time they log in|aren’t connected/i);
+    expect(content).not.toMatch(/live now/i);
+  });
+
+  it('channel path, re-check failed (status=failed) → reports "next sweep", not success', async () => {
+    reevaluateMember.mockResolvedValue({ status: 'failed', failed: [] });
+    const i = makeInteraction({
+      channel: fakeChannel([fakeOverwrite('r1', OverwriteType.Role, true)]),
+    });
+
+    await execute(i as never);
+
+    expect(upsertDenial).toHaveBeenCalledWith({}, 'target-1', 'r1', null, 'mod-1');
+    const content = i.reply.mock.calls[0][0].content;
+    expect(content).toMatch(/couldn’t re-check|next sweep/i);
+    expect(content).not.toMatch(/live now/i);
+  });
 });
