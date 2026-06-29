@@ -40,9 +40,31 @@ yet `content.is_live: false` → **included**; the representative `102` has **no
 (proving `is_live` is never consulted for visibility). No secrets or member PII appear
 in any fixture.
 
-`commitments.json` remains **source-mapped, not yet live-confirmed** — its endpoint
-(`POST …/assignment-commitments/list`) is authenticated and requires a member JWT,
-which `/preview` does not use. Confirm it when `/progress` (PR 3) is built.
+**`commitments.json` is now LIVE-CONFIRMED (mainnet, 2026-06-29).** Captured for
+`/progress` (PR 3) from `POST …/assignment-commitments/list` using a real member
+JWT (alias `james`, enrolled in the gated Issuer course) plus the operator
+`X-API-Key`. **The live shape drifted materially from the source-mapped guess** —
+the same lesson as the public endpoints:
+
+| Field | Original source-mapped guess | Live (confirmed) |
+|---|---|---|
+| envelope | bare array | `{ "data": [ … ] }` (handled by `unwrap`) |
+| status | top-level `status` ∈ {DRAFT, SUBMITTED, APPROVED, REFUSED} | **no top-level `status`**; the member-facing status is nested at **`content.commitment_status`** |
+| status enum | DRAFT/SUBMITTED/APPROVED/REFUSED | observed: **`ACCEPTED`**, **`CREDENTIAL_CLAIMED`** (others pass through verbatim) |
+| keys | `course_id`, `course_module_code` | ✓ same |
+| extras | — | `slt_hash`, `on_chain_status` ∈ {completed, pending}, `on_chain_content`, `content.evidence` (Tiptap), `content.assignment_evidence_hash`, `source` ∈ {merged, db_only} |
+
+The old `mapCommitments` read a top-level `status` that does not exist, so every
+row would have mapped to `status: ''` — silent breakage the live-confirm caught.
+`mapCommitments` now reads `content.commitment_status` (falling back to the entry
+for a flatter shape) and ignores `on_chain_status`/`evidence`. The endpoint
+returns only modules the member has **engaged**; a module absent from the
+response is "not started" (an opportunity), derived by the join, not the mapper.
+
+The committed fixture is **representative and PII-free**: real member evidence
+text, hashes, and personal course ids from the capture are replaced with neutral
+placeholders / synthetic hex; only the public gated Issuer course id and the
+confirmed structure + enum are kept.
 
 ## Files
 

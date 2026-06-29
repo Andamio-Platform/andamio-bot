@@ -76,15 +76,22 @@ export interface AssignmentContent {
 }
 
 /**
- * A member's commitment status for one module's assignment. Known values are
- * listed for editor hints; the `(string & {})` arm keeps the type total so a
- * new server-side status passes through verbatim instead of being dropped.
+ * A member's commitment status for one module's assignment.
+ *
+ * Values are LIVE-CONFIRMED against mainnet (2026-06-29): the commitment status
+ * lives at `content.commitment_status` on each entry — there is NO top-level
+ * `status` field (the original source-mapped guess of {DRAFT, SUBMITTED,
+ * APPROVED, REFUSED} was wrong). The confirmed values observed are `ACCEPTED`
+ * (assignment approved) and `CREDENTIAL_CLAIMED` (credential earned). The
+ * `(string & {})` arm keeps the type total so any other server-side status
+ * (e.g. a pending/submitted/refused lifecycle value not present in the capture)
+ * passes through verbatim instead of being dropped; the display layer maps
+ * unknowns to a neutral glyph. A sibling `on_chain_status` ({completed,
+ * pending}) is intentionally not surfaced yet — see {@link mapCommitments}.
  */
 export type CommitmentStatus =
-  | 'DRAFT'
-  | 'SUBMITTED'
-  | 'APPROVED'
-  | 'REFUSED'
+  | 'ACCEPTED'
+  | 'CREDENTIAL_CLAIMED'
   // eslint-disable-next-line @typescript-eslint/ban-types
   | (string & {});
 
@@ -92,6 +99,7 @@ export type CommitmentStatus =
 export interface AssignmentCommitment {
   courseId: string;
   moduleCode: string;
+  /** The member-facing commitment lifecycle (`content.commitment_status`). */
   status: CommitmentStatus;
 }
 
@@ -223,8 +231,16 @@ export function mapAssignment(raw: unknown): AssignmentContent {
 
 /**
  * Map a commitments response into {@link AssignmentCommitment}[]. Drops entries
- * missing a course id or module code. The `status` string is passed through
- * verbatim so an unrecognized server-side status survives to the display layer.
+ * missing a course id or module code.
+ *
+ * Shape (LIVE-CONFIRMED, mainnet 2026-06-29): the body is a `{ data: [ … ] }`
+ * envelope; each entry carries top-level `course_id` + `course_module_code` and
+ * nests the member-facing status at `content.commitment_status`. There is NO
+ * top-level `status` field. The status string is passed through verbatim so an
+ * unrecognized lifecycle value survives to the display layer. The sibling
+ * `on_chain_status` and `content.evidence` are intentionally ignored here — the
+ * progress views key only on course + module + commitment status (1:1
+ * module↔assignment). `unwrap` tolerates a bare (un-enveloped) array too.
  */
 export function mapCommitments(raw: unknown): AssignmentCommitment[] {
   return asArray(unwrap(raw))
@@ -232,10 +248,13 @@ export function mapCommitments(raw: unknown): AssignmentCommitment[] {
       const courseId = asString(prop(entry, 'course_id'));
       const moduleCode = asString(prop(entry, 'course_module_code'));
       if (courseId === '' || moduleCode === '') return null;
+      // Status is nested under `content`; tolerate a flatter shape by falling
+      // back to the entry itself so a future flattening still maps.
+      const content = prop(entry, 'content') ?? entry;
       return {
         courseId,
         moduleCode,
-        status: asString(prop(entry, 'status')),
+        status: asString(prop(content, 'commitment_status')),
       };
     })
     .filter((c): c is AssignmentCommitment => c !== null);

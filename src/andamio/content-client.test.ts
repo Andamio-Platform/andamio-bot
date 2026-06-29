@@ -210,52 +210,74 @@ describe('mapAssignment', () => {
 });
 
 describe('mapCommitments', () => {
-  it('maps the commitments fixture into course/module/status rows', () => {
+  // Shape LIVE-CONFIRMED (mainnet 2026-06-29): { data: [ … ] } envelope; status
+  // nested at content.commitment_status (NO top-level `status`); keys course_id
+  // + course_module_code. See __fixtures__/content/README.md.
+  it('maps the live commitments fixture: status from content.commitment_status', () => {
     const commitments = mapCommitments(commitmentsFixture);
     expect(commitments).toEqual([
       {
         courseId: 'ae192632aabe00ed2042eaef596bc15f3887fa32e75e8f9b8fa516df',
         moduleCode: '101',
-        status: 'APPROVED',
+        status: 'ACCEPTED',
       },
       {
         courseId: 'ae192632aabe00ed2042eaef596bc15f3887fa32e75e8f9b8fa516df',
         moduleCode: '102',
-        status: 'SUBMITTED',
-      },
-      {
-        courseId: 'ae192632aabe00ed2042eaef596bc15f3887fa32e75e8f9b8fa516df',
-        moduleCode: '104',
-        status: 'REFUSED',
+        status: 'CREDENTIAL_CLAIMED',
       },
     ]);
   });
 
-  it('passes an unrecognized status string through verbatim', () => {
+  it('maps a bare (un-enveloped) array identically to the enveloped fixture', () => {
+    const bare = (commitmentsFixture as { data: unknown[] }).data;
+    expect(mapCommitments(bare)).toEqual(mapCommitments(commitmentsFixture));
+  });
+
+  it('passes an unrecognized commitment_status through verbatim', () => {
     const commitments = mapCommitments([
-      { course_id: 'c', course_module_code: '1', status: 'FUTURE_STATUS' },
+      {
+        course_id: 'c',
+        course_module_code: '1',
+        content: { commitment_status: 'FUTURE_STATUS' },
+      },
     ]);
     expect(commitments[0].status).toBe('FUTURE_STATUS');
   });
 
+  it('falls back to entry-level commitment_status when there is no nested content', () => {
+    const commitments = mapCommitments([
+      { course_id: 'c', course_module_code: '1', commitment_status: 'ACCEPTED' },
+    ]);
+    expect(commitments[0].status).toBe('ACCEPTED');
+  });
+
+  it('defaults status to empty string when commitment_status is absent', () => {
+    const commitments = mapCommitments([
+      { course_id: 'c', course_module_code: '1', content: {} },
+    ]);
+    expect(commitments[0].status).toBe('');
+  });
+
   it('drops a commitment missing its course id or module code', () => {
     const commitments = mapCommitments([
-      { course_id: 'c', course_module_code: '1', status: 'DRAFT' },
-      { course_id: 'c', status: 'DRAFT' }, // no module code → dropped
-      { course_module_code: '2', status: 'DRAFT' }, // no course id → dropped
+      { course_id: 'c', course_module_code: '1', content: { commitment_status: 'ACCEPTED' } },
+      { course_id: 'c', content: { commitment_status: 'ACCEPTED' } }, // no module code → dropped
+      { course_module_code: '2', content: { commitment_status: 'ACCEPTED' } }, // no course id → dropped
     ]);
     expect(commitments).toHaveLength(1);
     expect(commitments[0]).toEqual({
       courseId: 'c',
       moduleCode: '1',
-      status: 'DRAFT',
+      status: 'ACCEPTED',
     });
   });
 
-  it('tolerates empty / missing / enveloped bodies', () => {
+  it('tolerates empty / missing bodies and re-enveloping the bare array', () => {
     expect(mapCommitments([])).toEqual([]);
     expect(mapCommitments({})).toEqual([]);
-    expect(mapCommitments({ data: commitmentsFixture })).toEqual(
+    const bare = (commitmentsFixture as { data: unknown[] }).data;
+    expect(mapCommitments({ data: bare })).toEqual(
       mapCommitments(commitmentsFixture),
     );
   });
