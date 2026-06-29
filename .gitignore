@@ -8,3 +8,4 @@ dist/
 # Note: config/role-mappings.json IS committed (the demo gating config; edit it
 # when you fork). Only the database stays out of git.
 data/
+.worktrees
