@@ -41,6 +41,7 @@ Other guides: [deploy anywhere](./docs/DEPLOY.md) ·
 | `/available` | Lists the credentials this server gates channels on, each marked held or not, with a link to earn the ones they lack. Works before connecting. |
 | `/check` | Re-reads the member's credentials live, updates their roles, and reports which gated credentials they hold and still need. One command to refresh roles and see where you stand. |
 | `/faq` | With no argument, shows a get-started guide (connect, see what you hold, check access, browse what unlocks channels), plus a config-built list of what this server gates on. With `question:<…>` it answers a Q&A entry, offering **autocomplete** over the questions in `FAQ_PATH` (default `config/faq.json`; see `config/faq.example.json`). Local-only — renders identically before connecting and when Andamio is down; an unknown question or missing config falls back to the guide. |
+| `/preview` | Previews a course's live modules and a chosen module's lesson or assignment as an ephemeral embed. `course:<…>` selects a course (curated by `COURSE_DISPLAY_NAMES`, like `/credentials`); the optional `module:<…>` **autocompletes** the course's live modules. With no module it lists the live modules; with one it renders the lesson (or the assignment when the module has none) as a title plus a plain-text excerpt. Public content — renders identically before connecting and degrades gracefully when Andamio is down. |
 
 ## Moderator commands (deny-list)
 

@@ -126,10 +126,10 @@ function prop(value: unknown, key: string): unknown {
 }
 
 /**
- * Unwrap an optional `{ data: ... }` envelope. The dashboard endpoint wraps its
- * payload in `data`; the content endpoints' envelope is source-mapped but
- * unconfirmed, so this tolerates either: if the body is an object carrying a
- * `data` property, use that; otherwise use the body as-is.
+ * Unwrap an optional `{ data: ... }` envelope. The dashboard endpoint and the
+ * live content endpoints both wrap their payload in `data` (confirmed against
+ * mainnet); this stays tolerant of a bare body too: if the body is an object
+ * carrying a `data` property, use that; otherwise use the body as-is.
  */
 function unwrap(body: unknown): unknown {
   if (typeof body === 'object' && body !== null && 'data' in body) {

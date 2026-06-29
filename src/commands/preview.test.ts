@@ -232,6 +232,15 @@ describe('renderModulePreviewEmbed', () => {
     expect(embed.title).toBe('Lesson: Bare');
     expect(embed.description).toMatch(/no description available/i);
   });
+
+  it('clamps an over-long content title to Discord 256-char embed-title limit', () => {
+    const embed = renderModulePreviewEmbed(
+      module,
+      { title: 'T'.repeat(400), contentJson: null },
+      'lesson',
+    ).toJSON();
+    expect((embed.title as string).length).toBeLessThanOrEqual(256);
+  });
 });
 
 // --- courseChoices / moduleChoices / isCourseSelectable (U3) ---------------
@@ -262,6 +271,20 @@ describe('courseChoices', () => {
   it('returns [] when nothing is curated and nothing is gated (focused server)', () => {
     expect(courseChoices(filterOf({}, []), '')).toEqual([]);
   });
+
+  it('falls back to the id when a configured display name is empty (never an empty choice name)', () => {
+    // An empty-string name would make Discord reject the entire batch.
+    const choices = courseChoices(filterOf({ c1: '', c2: 'Course Two' }), '');
+    expect(choices).toContainEqual({ name: 'c1', value: 'c1' });
+    expect(choices).toContainEqual({ name: 'Course Two', value: 'c2' });
+    expect(choices.every((c) => c.name.length > 0)).toBe(true);
+  });
+
+  it('truncates an over-long display name to Discord 100-char choice limit', () => {
+    const choices = courseChoices(filterOf({ c1: 'N'.repeat(150) }), '');
+    expect(choices[0].name.length).toBeLessThanOrEqual(100);
+    expect(choices[0].value).toBe('c1');
+  });
 });
 
 describe('moduleChoices', () => {
@@ -275,6 +298,16 @@ describe('moduleChoices', () => {
   it('narrows by the focused query over title and code', () => {
     expect(moduleChoices(allModules, '102')).toHaveLength(1);
     expect(moduleChoices(allModules, 'nope')).toHaveLength(0);
+  });
+
+  it('truncates an over-long module choice name to Discord 100-char limit', () => {
+    const choices = moduleChoices(
+      [{ title: 'M'.repeat(150), description: '', isLive: true, moduleCode: '900' }],
+      '',
+    );
+    expect(choices).toHaveLength(1);
+    expect(choices[0].name.length).toBeLessThanOrEqual(100);
+    expect(choices[0].value).toBe('900');
   });
 });
 
@@ -391,6 +424,63 @@ describe('/preview execute', () => {
 
     expect(lastReply(interaction.editReply).content).toMatch(/no preview available/i);
   });
+
+  it('empty/degraded assignment content → "no preview available"', async () => {
+    getCourseModules.mockResolvedValue(allModules);
+    getModuleSlts.mockResolvedValue([
+      { sltText: 'x', sltIndex: 1, hasLesson: false } as ModuleSlt,
+    ]);
+    getAssignment.mockResolvedValue({ title: '', contentJson: null });
+    const interaction = makeChat(CID, '102');
+
+    await execute(interaction as never);
+
+    expect(lastReply(interaction.editReply).content).toMatch(/no preview available/i);
+  });
+
+  it('ApiError from getModuleSlts (mid-flow) → friendly retry note', async () => {
+    getCourseModules.mockResolvedValue(allModules);
+    getModuleSlts.mockRejectedValue(new ApiError('http', '500', 500));
+    const interaction = makeChat(CID, '102');
+
+    await expect(execute(interaction as never)).resolves.toBeUndefined();
+    expect(lastReply(interaction.editReply).content).toMatch(/try .*preview.* again/i);
+  });
+
+  it('ApiError from getLesson (mid-flow) → friendly retry note', async () => {
+    getCourseModules.mockResolvedValue(allModules);
+    getModuleSlts.mockResolvedValue([
+      { sltText: 'x', sltIndex: 1, hasLesson: true } as ModuleSlt,
+    ]);
+    getLesson.mockRejectedValue(new ApiError('network', 'down'));
+    const interaction = makeChat(CID, '102');
+
+    await execute(interaction as never);
+    expect(lastReply(interaction.editReply).content).toMatch(/try .*preview.* again/i);
+  });
+
+  it('a non-ApiError thrown mid-render → friendly note AND a logged error', async () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    getCourseModules.mockRejectedValue(new Error('unexpected bug'));
+    const interaction = makeChat(CID, null);
+
+    await expect(execute(interaction as never)).resolves.toBeUndefined();
+    expect(lastReply(interaction.editReply).content).toMatch(/try .*preview.* again/i);
+    expect(errSpy).toHaveBeenCalled(); // the real bug stays visible in logs
+  });
+
+  it('role-mappings fail to load → command still renders, no crash', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    loadMappings.mockImplementation(() => {
+      throw new Error('bad role-mappings.json');
+    });
+    getCourseModules.mockResolvedValue(allModules);
+    const interaction = makeChat(CID, null);
+
+    await execute(interaction as never);
+    // No curation configured → course is selectable, module list renders.
+    expect(embedJson(lastReply(interaction.editReply)).title).toMatch(/^Preview —/);
+  });
 });
 
 // --- autocomplete (U4) -----------------------------------------------------
@@ -436,5 +526,34 @@ describe('/preview autocomplete', () => {
 
     await expect(autocomplete(interaction as never)).resolves.toBeUndefined();
     expect(interaction.respond).toHaveBeenCalledWith([]);
+  });
+
+  it('module focused with a non-curated course → [] (no enumeration, no API call)', async () => {
+    // Curation ON: only CID is surfaced; a hand-typed other id must be ignored.
+    loadCourseDisplayNames.mockReturnValue({ [CID]: 'Andamio Issuer' });
+    loadMappings.mockReturnValue({ rules: [], managedRoleIds: new Set() });
+    const interaction = makeAuto('module', '', 'some-other-course');
+
+    await autocomplete(interaction as never);
+
+    expect(interaction.respond).toHaveBeenCalledWith([]);
+    expect(getCourseModules).not.toHaveBeenCalled();
+  });
+
+  it('module fetch that overruns the Discord budget → responds [] (never hangs)', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.useFakeTimers();
+    try {
+      getCourseModules.mockReturnValue(new Promise(() => {})); // never resolves
+      const interaction = makeAuto('module', '', CID);
+
+      const pending = autocomplete(interaction as never);
+      await vi.advanceTimersByTimeAsync(3_000); // past AUTOCOMPLETE_BUDGET_MS
+      await pending;
+
+      expect(interaction.respond).toHaveBeenCalledWith([]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

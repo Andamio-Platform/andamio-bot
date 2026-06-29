@@ -15,14 +15,13 @@ import {
 } from '../andamio/dashboard-client';
 import { isExpired } from '../andamio/jwt';
 import { buildReloginPrompt } from '../discord/relogin-prompt';
-import { loadCourseDisplayNames, loadShowAllCourses } from '../andamio/course-names';
-import { loadMappings } from '../gating/mappings';
 import {
   displayNameFor,
   isDisplayed,
   type DisplayFilter,
 } from '../andamio/course-names';
 import { fitFieldValue } from './embed-field';
+import { loadDisplayFilter } from './display-filter';
 
 export const data = new SlashCommandBuilder()
   .setName('credentials')
@@ -112,20 +111,10 @@ export async function execute(
     return;
   }
 
-  // Build the curated-display filter: the labels map doubles as the visibility
-  // allow-list (course-names.ts). Gated courses (named by a role-mapping rule)
-  // are always shown, so load the mappings for their course ids; a config
-  // problem here must never break /credentials, so fall back to no gated set.
-  const names = loadCourseDisplayNames();
-  const showAll = loadShowAllCourses();
-  let gatedCourseIds: ReadonlySet<string> = new Set();
-  try {
-    const mappings = loadMappings(config.roleMappingsPath);
-    gatedCourseIds = new Set(mappings.rules.map((r) => r.course_id));
-  } catch (err) {
-    console.error('Could not load role-mappings for display curation:', err);
-  }
-  const filter: DisplayFilter = { names, showAll, gatedCourseIds };
+  // Build the curated-display filter (labels map doubles as the visibility
+  // allow-list; gated courses always shown). Shared with /preview and other
+  // course-listing commands; a config problem must never break /credentials.
+  const filter: DisplayFilter = loadDisplayFilter(config.roleMappingsPath);
 
   let state: UserState;
   try {

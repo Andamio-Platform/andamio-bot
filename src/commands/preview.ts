@@ -20,12 +20,10 @@ import {
 import {
   displayNameFor,
   isDisplayed,
-  loadCourseDisplayNames,
-  loadShowAllCourses,
   type DisplayFilter,
 } from '../andamio/course-names';
-import { loadMappings } from '../gating/mappings';
 import { fitFieldValue } from './embed-field';
+import { loadDisplayFilter } from './display-filter';
 
 /**
  * `/preview` — surface a course's live modules and render a chosen module's
@@ -48,8 +46,43 @@ import { fitFieldValue } from './embed-field';
 /** Discord caps an autocomplete response at 25 choices. */
 const CHOICE_LIMIT = 25;
 
+/** Discord caps an autocomplete choice `name` at 100 characters. */
+const CHOICE_NAME_MAX = 100;
+
+/** Discord caps an embed title at 256 characters. */
+const EMBED_TITLE_MAX = 256;
+
+/**
+ * Bound the module-autocomplete API read well under Discord's ~3s autocomplete
+ * response window — the content-client's own 10s timeout would let a slow-but-
+ * healthy API overrun the window and silently drop the whole suggestion list.
+ */
+const AUTOCOMPLETE_BUDGET_MS = 2_500;
+
 /** Max length of the plain-text excerpt pulled from a Tiptap document. */
 const EXCERPT_MAX = 280;
+
+/** Truncate `text` to `max` chars with a trailing ellipsis when it overflows. */
+function clamp(text: string, max: number): string {
+  return text.length <= max ? text : text.slice(0, max - 1).trimEnd() + '…';
+}
+
+/**
+ * Race `work` against a deadline, rejecting if it does not settle in time. Used
+ * to keep the module-autocomplete fetch inside Discord's response window; the
+ * underlying request keeps running but its (late) result is discarded.
+ */
+async function withBudget<T>(work: Promise<T>, ms: number): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error('autocomplete budget exceeded')), ms);
+  });
+  try {
+    return await Promise.race([work, deadline]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 /** Shown when the API is unreachable or returns an error. */
 const ERROR_REPLY =
@@ -99,7 +132,7 @@ export function renderModuleListEmbed(
   liveModules: CourseModule[],
 ): EmbedBuilder {
   const embed = new EmbedBuilder()
-    .setTitle(`Preview — ${courseLabel}`)
+    .setTitle(clamp(`Preview — ${courseLabel}`, EMBED_TITLE_MAX))
     .setDescription(
       liveModules.length > 0
         ? 'Live modules in this course. Re-run `/preview` with a `module` to see ' +
@@ -132,7 +165,7 @@ export function renderModulePreviewEmbed(
   const excerpt = tiptapExcerpt(content.contentJson);
 
   return new EmbedBuilder()
-    .setTitle(`${label}: ${title}`)
+    .setTitle(clamp(`${label}: ${title}`, EMBED_TITLE_MAX))
     .setDescription(excerpt || '_No description available for this content yet._')
     .addFields({
       name: 'Module',
@@ -148,10 +181,34 @@ function isEmptyContent(content: LessonContent | AssignmentContent): boolean {
 // --- pure selection helpers (U3) -------------------------------------------
 
 /**
+ * Shared shaping for both autocompletes: drop choices with an empty name or
+ * value (Discord rejects the *whole* batch if any single choice is invalid),
+ * narrow by the focused query (case-insensitive over name and value, matched
+ * against the full name before truncation), bound each name to Discord's
+ * 100-char limit, and cap at the 25-choice limit.
+ */
+function narrowChoices(
+  choices: { name: string; value: string }[],
+  focused: string,
+): { name: string; value: string }[] {
+  const q = focused.trim().toLowerCase();
+  return choices
+    .filter((c) => c.name !== '' && c.value !== '')
+    .filter(
+      (c) =>
+        q === '' ||
+        c.name.toLowerCase().includes(q) ||
+        c.value.toLowerCase().includes(q),
+    )
+    .map((c) => ({ name: clamp(c.name, CHOICE_NAME_MAX), value: c.value }))
+    .slice(0, CHOICE_LIMIT);
+}
+
+/**
  * Build the curated course choices for the `course` autocomplete: the union of
  * the display-name map keys and the gated course ids, kept to those the filter
- * surfaces, labelled by display name, optionally narrowed by the focused query,
- * and capped at Discord's 25-choice limit.
+ * surfaces, labelled by display name (falling back to the raw id when the
+ * configured label is blank), narrowed and bounded by {@link narrowChoices}.
  *
  * Note: there is no full course-catalog source here, so when no courses are
  * curated and none are gated the list is empty by design (a focused server is
@@ -165,42 +222,28 @@ export function courseChoices(
     ...Object.keys(filter.names),
     ...filter.gatedCourseIds,
   ]);
-  const q = focused.trim().toLowerCase();
-  return [...ids]
+  const choices = [...ids]
     .filter((id) => isDisplayed(id, filter))
-    .map((id) => ({ name: displayNameFor(id, filter.names), value: id }))
-    .filter(
-      (c) =>
-        q === '' ||
-        c.name.toLowerCase().includes(q) ||
-        c.value.toLowerCase().includes(q),
-    )
-    .slice(0, CHOICE_LIMIT);
+    .map((id) => ({ name: displayNameFor(id, filter.names) || id, value: id }));
+  return narrowChoices(choices, focused);
 }
 
 /**
  * Build the live-module choices for the `module` autocomplete: live modules only,
- * labelled `Title (code)`, valued by module code, narrowed by the focused query,
- * capped at 25.
+ * labelled `Title (code)`, valued by module code, narrowed and bounded by
+ * {@link narrowChoices}.
  */
 export function moduleChoices(
   modules: CourseModule[],
   focused: string,
 ): { name: string; value: string }[] {
-  const q = focused.trim().toLowerCase();
-  return modules
+  const choices = modules
     .filter((m) => m.isLive)
     .map((m) => ({
       name: `${m.title || m.moduleCode} (${m.moduleCode})`,
       value: m.moduleCode,
-    }))
-    .filter(
-      (c) =>
-        q === '' ||
-        c.name.toLowerCase().includes(q) ||
-        c.value.toLowerCase().includes(q),
-    )
-    .slice(0, CHOICE_LIMIT);
+    }));
+  return narrowChoices(choices, focused);
 }
 
 /** Whether a course id is one this server surfaces (drives the execute guard). */
@@ -236,56 +279,36 @@ export const data = new SlashCommandBuilder()
   );
 
 /**
- * Build the curated-display filter exactly as `/credentials` does: the labels map
- * doubles as the visibility allow-list, and gated courses (named by a role-mapping
- * rule) are always surfaced. A config problem must never break `/preview`, so a
- * failed mappings read falls back to an empty gated set.
- */
-function buildDisplayFilter(roleMappingsPath: string): DisplayFilter {
-  const names = loadCourseDisplayNames();
-  const showAll = loadShowAllCourses();
-  let gatedCourseIds: ReadonlySet<string> = new Set();
-  try {
-    const mappings = loadMappings(roleMappingsPath);
-    gatedCourseIds = new Set(mappings.rules.map((r) => r.course_id));
-  } catch (err) {
-    console.error(
-      '/preview: could not load role-mappings for course curation:',
-      err,
-    );
-  }
-  return { names, showAll, gatedCourseIds };
-}
-
-/**
  * Autocomplete for both options. `course` returns the curated set with no API
  * call (Discord's ~3s budget). `module` reads the already-chosen `course` and
- * lists its live modules; with no course chosen, or on any failure, it responds
- * with an empty list — autocomplete must never throw to Discord.
+ * lists its live modules — but only when that course is one the server surfaces
+ * (`isCourseSelectable`), so a hand-typed non-curated id cannot enumerate an
+ * arbitrary course's modules via the operator key. With no/invalid course, or on
+ * any failure, it responds with an empty list — autocomplete must never throw to
+ * Discord.
  */
 export async function autocomplete(
   interaction: AutocompleteInteraction,
 ): Promise<void> {
   try {
     const config = loadConfig();
+    const filter = loadDisplayFilter(config.roleMappingsPath);
     const focused = interaction.options.getFocused(true);
 
     if (focused.name === 'course') {
-      const filter = buildDisplayFilter(config.roleMappingsPath);
       await interaction.respond(courseChoices(filter, focused.value));
       return;
     }
 
     const courseId = interaction.options.getString('course') ?? '';
-    if (courseId === '') {
+    if (!isCourseSelectable(courseId, filter)) {
       await interaction.respond([]);
       return;
     }
 
-    const modules = await getCourseModules(
-      config.andamioApiBaseUrl,
-      config.andamioApiKey,
-      courseId,
+    const modules = await withBudget(
+      getCourseModules(config.andamioApiBaseUrl, config.andamioApiKey, courseId),
+      AUTOCOMPLETE_BUDGET_MS,
     );
     await interaction.respond(moduleChoices(modules, focused.value));
   } catch (err) {
@@ -302,7 +325,7 @@ export async function execute(
   interaction: ChatInputCommandInteraction,
 ): Promise<void> {
   const config = loadConfig();
-  const filter = buildDisplayFilter(config.roleMappingsPath);
+  const filter = loadDisplayFilter(config.roleMappingsPath);
   const courseId = interaction.options.getString('course', true);
 
   // Reject a hand-typed, non-surfaced course before spending an API call.
