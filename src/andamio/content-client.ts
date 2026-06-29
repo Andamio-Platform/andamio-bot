@@ -299,7 +299,7 @@ export async function getCourseModules(
   apiKey: string,
   courseId: string,
 ): Promise<CourseModule[]> {
-  const url = `${apiBaseUrl}/api/v2/course/user/modules/${courseId}`;
+  const url = `${apiBaseUrl}/api/v2/course/user/modules/${encodeURIComponent(courseId)}`;
   return mapModules(await andamioGet(url, apiKey));
 }
 
@@ -310,7 +310,7 @@ export async function getModuleSlts(
   courseId: string,
   moduleCode: string,
 ): Promise<ModuleSlt[]> {
-  const url = `${apiBaseUrl}/api/v2/course/user/slts/${courseId}/${moduleCode}`;
+  const url = `${apiBaseUrl}/api/v2/course/user/slts/${encodeURIComponent(courseId)}/${encodeURIComponent(moduleCode)}`;
   return mapSlts(await andamioGet(url, apiKey));
 }
 
@@ -322,7 +322,7 @@ export async function getLesson(
   moduleCode: string,
   sltIndex: number,
 ): Promise<LessonContent> {
-  const url = `${apiBaseUrl}/api/v2/course/user/lesson/${courseId}/${moduleCode}/${sltIndex}`;
+  const url = `${apiBaseUrl}/api/v2/course/user/lesson/${encodeURIComponent(courseId)}/${encodeURIComponent(moduleCode)}/${encodeURIComponent(sltIndex)}`;
   return mapLesson(await andamioGet(url, apiKey));
 }
 
@@ -333,7 +333,7 @@ export async function getAssignment(
   courseId: string,
   moduleCode: string,
 ): Promise<AssignmentContent> {
-  const url = `${apiBaseUrl}/api/v2/course/user/assignment/${courseId}/${moduleCode}`;
+  const url = `${apiBaseUrl}/api/v2/course/user/assignment/${encodeURIComponent(courseId)}/${encodeURIComponent(moduleCode)}`;
   return mapAssignment(await andamioGet(url, apiKey));
 }
 

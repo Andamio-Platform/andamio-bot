@@ -35,10 +35,6 @@ const JWT = 'header.payload.sig';
 const CID = 'course_abc';
 const MODULE = '101';
 
-afterEach(() => {
-  vi.restoreAllMocks();
-});
-
 // --- mappers (U3/U4): pinned to the captured fixtures + envelope/totality ---
 
 describe('mapModules', () => {
@@ -165,13 +161,14 @@ describe('mapLesson', () => {
 });
 
 describe('mapAssignment', () => {
-  it('maps the assignment fixture', () => {
-    const assignment = mapAssignment(assignmentFixture);
-    expect(assignment.title).toBe('Module 101 Assignment');
-    expect(assignment.videoUrl).toBe('');
-    expect(assignment.contentJson).toEqual(
-      (assignmentFixture as { content_json: unknown }).content_json,
-    );
+  it('maps every field of the assignment fixture', () => {
+    expect(mapAssignment(assignmentFixture)).toEqual({
+      title: 'Module 101 Assignment',
+      description: 'Demonstrate that you can navigate the course.',
+      imageUrl: 'https://cdn.andamio.io/courses/intro/assignment-101.png',
+      videoUrl: '',
+      contentJson: (assignmentFixture as { content_json: unknown }).content_json,
+    });
   });
 
   it('tolerates missing/enveloped bodies', () => {
@@ -179,6 +176,20 @@ describe('mapAssignment', () => {
     expect(mapAssignment({ data: assignmentFixture })).toEqual(
       mapAssignment(assignmentFixture),
     );
+  });
+
+  // mapLesson and mapAssignment are deliberately identical today (the API
+  // returns the same shape for both). Pin that identity so a field added to
+  // one mapper but not the other fails loudly instead of silently diverging.
+  it('produces the same result as mapLesson for an identical body', () => {
+    const body = {
+      title: 'Same',
+      description: 'Same body',
+      image_url: 'https://cdn.andamio.io/x.png',
+      video_url: 'https://video.andamio.io/x.mp4',
+      content_json: { type: 'doc', content: [] },
+    };
+    expect(mapAssignment(body)).toEqual(mapLesson(body));
   });
 });
 
@@ -218,7 +229,11 @@ describe('mapCommitments', () => {
       { course_module_code: '2', status: 'DRAFT' }, // no course id → dropped
     ]);
     expect(commitments).toHaveLength(1);
-    expect(commitments[0].moduleCode).toBe('1');
+    expect(commitments[0]).toEqual({
+      courseId: 'c',
+      moduleCode: '1',
+      status: 'DRAFT',
+    });
   });
 
   it('tolerates empty / missing / enveloped bodies', () => {
@@ -233,6 +248,18 @@ describe('mapCommitments', () => {
 // --- public read functions (U3): URL + header split + mapping ---
 
 describe('public read functions', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /** Assert a public call sent X-API-Key but no member Bearer. */
+  function expectPublicHeaders(init: RequestInit | undefined): void {
+    expect(init?.method).toBe('GET');
+    const headers = (init?.headers ?? {}) as Record<string, string>;
+    expect(headers['X-API-Key']).toBe(KEY);
+    expect(headers['Authorization']).toBeUndefined();
+  }
+
   it('getCourseModules GETs the modules path with X-API-Key only', async () => {
     const fetchMock = vi
       .spyOn(globalThis, 'fetch')
@@ -242,41 +269,50 @@ describe('public read functions', () => {
 
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe(`${BASE}/api/v2/course/user/modules/${CID}`);
-    expect(init?.method).toBe('GET');
-    const headers = (init?.headers ?? {}) as Record<string, string>;
-    expect(headers['X-API-Key']).toBe(KEY);
-    expect(headers['Authorization']).toBeUndefined();
+    expectPublicHeaders(init);
     expect(modules).toHaveLength(3);
   });
 
-  it('getModuleSlts builds the slts path', async () => {
+  it('getModuleSlts builds the slts path, sends X-API-Key only, and maps the body', async () => {
     const fetchMock = vi
       .spyOn(globalThis, 'fetch')
       .mockResolvedValue(jsonResponse(sltsFixture));
-    await getModuleSlts(BASE, KEY, CID, MODULE);
-    expect(fetchMock.mock.calls[0][0]).toBe(
-      `${BASE}/api/v2/course/user/slts/${CID}/${MODULE}`,
-    );
+    const slts = await getModuleSlts(BASE, KEY, CID, MODULE);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe(`${BASE}/api/v2/course/user/slts/${CID}/${MODULE}`);
+    expectPublicHeaders(init);
+    expect(slts).toEqual(mapSlts(sltsFixture));
   });
 
-  it('getLesson builds the lesson path with the slt index', async () => {
+  it('getLesson builds the lesson path, sends X-API-Key only, and maps the body', async () => {
     const fetchMock = vi
       .spyOn(globalThis, 'fetch')
       .mockResolvedValue(jsonResponse(lessonFixture));
     const lesson = await getLesson(BASE, KEY, CID, MODULE, 0);
-    expect(fetchMock.mock.calls[0][0]).toBe(
-      `${BASE}/api/v2/course/user/lesson/${CID}/${MODULE}/0`,
-    );
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe(`${BASE}/api/v2/course/user/lesson/${CID}/${MODULE}/0`);
+    expectPublicHeaders(init);
     expect(lesson.title).toBe('What is Andamio?');
   });
 
-  it('getAssignment builds the assignment path', async () => {
+  it('getAssignment builds the assignment path, sends X-API-Key only, and maps the body', async () => {
     const fetchMock = vi
       .spyOn(globalThis, 'fetch')
       .mockResolvedValue(jsonResponse(assignmentFixture));
-    await getAssignment(BASE, KEY, CID, MODULE);
+    const assignment = await getAssignment(BASE, KEY, CID, MODULE);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe(`${BASE}/api/v2/course/user/assignment/${CID}/${MODULE}`);
+    expectPublicHeaders(init);
+    expect(assignment).toEqual(mapAssignment(assignmentFixture));
+  });
+
+  it('percent-encodes path params so a stray segment cannot re-target the request', async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(jsonResponse(sltsFixture));
+    await getModuleSlts(BASE, KEY, 'a/b', '1 2');
     expect(fetchMock.mock.calls[0][0]).toBe(
-      `${BASE}/api/v2/course/user/assignment/${CID}/${MODULE}`,
+      `${BASE}/api/v2/course/user/slts/a%2Fb/1%202`,
     );
   });
 
@@ -292,6 +328,10 @@ describe('public read functions', () => {
 // --- authenticated read function (U4) ---
 
 describe('getAssignmentCommitments', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it('POSTs the commitments path with X-API-Key AND a member Bearer', async () => {
     const fetchMock = vi
       .spyOn(globalThis, 'fetch')
@@ -302,11 +342,12 @@ describe('getAssignmentCommitments', () => {
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe(`${BASE}/api/v2/course/student/assignment-commitments/list`);
     expect(init?.method).toBe('POST');
+    expect(init?.body).toBe('{}');
     const headers = (init?.headers ?? {}) as Record<string, string>;
     expect(headers['X-API-Key']).toBe(KEY);
     expect(headers['Authorization']).toBe(`Bearer ${JWT}`);
     expect(headers['Content-Type']).toBe('application/json');
-    expect(commitments).toHaveLength(3);
+    expect(commitments).toEqual(mapCommitments(commitmentsFixture));
   });
 
   it('surfaces a 401 as an unauthorized ApiError (reconnect-prompt branch)', async () => {
@@ -316,11 +357,23 @@ describe('getAssignmentCommitments', () => {
     expect(err.kind).toBe('unauthorized');
     expect(err.status).toBe(401);
   });
+
+  it('maps non-401 errors on the POST path too (500 -> http)', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse({}, 500));
+    const err = await getAssignmentCommitments(BASE, KEY, JWT).catch((e) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err.kind).toBe('http');
+    expect(err.status).toBe(500);
+  });
 });
 
 // --- fetch layer error taxonomy (U2), exercised through getCourseModules ---
 
 describe('fetch layer error taxonomy', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it('maps a network/fetch rejection to a network ApiError', async () => {
     vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('ECONNREFUSED'));
     const err = await getCourseModules(BASE, KEY, CID).catch((e) => e);
