@@ -48,3 +48,12 @@ Build and run the compiled bot with `npm run build && npm start`.
 
 This repository's git history was intentionally squashed to a single clean
 initial commit before it was made public; there are no secrets in history.
+
+## Code of conduct
+
+By participating you agree to uphold our [Code of Conduct](CODE_OF_CONDUCT.md).
+
+## License
+
+By contributing, you agree that your contributions are licensed under the
+[Apache License 2.0](LICENSE), the same license that covers this project.
