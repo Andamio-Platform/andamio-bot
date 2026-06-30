@@ -91,7 +91,7 @@ export function deleteLink(db: Db, discordId: string): void {
  * Any prior pending row for the same Discord id is deleted first: a member only
  * ever needs one live login URL, and starting a new login invalidates the old
  * one. This bounds the table to one row per in-flight member, so repeatedly
- * triggering the Connect button (e.g. an expired-JWT member running `/refresh`)
+ * triggering the Connect button (e.g. an expired-JWT member running `/check`)
  * cannot accumulate orphaned rows.
  */
 export function createPending(db: Db, state: string, discordId: string): void {
