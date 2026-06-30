@@ -56,7 +56,7 @@ block a member from a channel without revoking their credential. Lift it with
 
 | Command | What it does |
 |---------|--------------|
-| `/deny <member> [role] [reason]` | Blocks `member` from a gated `role` (omit `role` to block **all** gated roles) even if they hold the credential. The block is recorded immediately and applies on the next login if the member isn't connected. `reason` shows in `/denials`. |
+| `/deny <member> [role] [channel] [reason]` | Blocks `member` from gated roles even if they hold the credential. Name a `role` to withhold just that one (omit it to block **all** gated roles), or name a `channel` to block every role the bot manages that gates that channel. `role` and `channel` are mutually exclusive — pick one. The block is recorded immediately and applies on the next login if the member isn't connected. `reason` shows in `/denials`. |
 | `/allow <member> [role]` | Lifts a block. Name a `role` to lift just that one, or omit it to lift **all** blocks on the member. Any role they've earned is then restored. |
 | `/denials [member]` | Lists active blocks (who, which role or "all gated roles", reason, who set it). Omit `member` for the whole server. |
 
