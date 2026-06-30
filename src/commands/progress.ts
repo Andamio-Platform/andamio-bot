@@ -14,7 +14,11 @@ import {
   getCourseModules,
   ApiError,
 } from '../andamio/content-client';
-import { getUserDashboard } from '../andamio/dashboard-client';
+import {
+  getUserDashboard,
+  ApiError as DashboardApiError,
+  type UserState,
+} from '../andamio/dashboard-client';
 import { isExpired } from '../andamio/jwt';
 import { buildReloginPrompt } from '../discord/relogin-prompt';
 import {
@@ -33,15 +37,20 @@ import { fitFieldValue } from './embed-field';
 import { loadDisplayFilter } from './display-filter';
 
 /**
- * `/progress` — a connected member's per-module progress in an enrolled course,
- * and the open opportunities within it.
+ * `/progress` — a connected member's progress, at two altitudes.
  *
- * Course Modules ↔ Assignments are 1:1, so each module's commitment status *is*
- * its progress, and a module with no commitment (or a refused one) *is* an open
- * opportunity. Two views read one pure join ({@link joinModuleProgress}): the
- * default lists every on-chain module with a status glyph; `view:opportunities`
- * lists only the ⬜/❌ rows. Course selection autocompletes the member's enrolled,
- * server-surfaced courses.
+ * With NO `course`, it shows an overview: the credentials the member has earned
+ * across every completed course (including ones they're no longer enrolled in)
+ * plus their in-progress courses ({@link renderProgressOverviewEmbed}, off the
+ * dashboard read). This is the "what have I earned?" view.
+ *
+ * With a `course`, it shows that course's per-module detail. Course Modules ↔
+ * Assignments are 1:1, so each module's commitment status *is* its progress, and
+ * a module with no commitment (or a refused one) *is* an open opportunity. Two
+ * views read one pure join ({@link joinModuleProgress}): the default lists every
+ * on-chain module with a status glyph; `view:opportunities` lists only the ⬜/❌
+ * rows. Course selection autocompletes the member's enrolled AND completed
+ * server-surfaced courses, so a finished course can be drilled into too.
  *
  * Display-only and member-scoped, like `/credentials`: it reads commitments via
  * the member Bearer but NEVER feeds role gating (the gating evaluator stays the
@@ -152,20 +161,77 @@ export function renderOpportunitiesEmbed(
     });
 }
 
+/**
+ * The overview embed shown when no course is chosen: the member's earned
+ * credentials across every completed course (including ones they're no longer
+ * enrolled in), plus their in-progress courses. Mirrors the sections `/credentials`
+ * renders, framed as a progress summary, and points the member at the `course`
+ * option to drill into a single course's module-by-module detail. Both lists are
+ * restricted to courses this server surfaces (curated display).
+ */
+export function renderProgressOverviewEmbed(
+  state: UserState,
+  filter: DisplayFilter,
+): EmbedBuilder {
+  const { names } = filter;
+  const embed = new EmbedBuilder()
+    .setTitle('Your Andamio Progress')
+    .setDescription(
+      `Connected as \`${state.alias}\`. Pick a course in the \`course\` option ` +
+        'to see its module-by-module detail.',
+    );
+
+  // Credentials earned: every completed course + its claimed-credential count,
+  // independent of current enrolment (so past courses still show what was earned).
+  const completed = state.completedCourses.filter((c) =>
+    isDisplayed(c.courseId, filter),
+  );
+  if (completed.length > 0) {
+    const lines = completed.map((c) => {
+      const name = displayNameFor(c.courseId, names) || c.courseId;
+      const n = c.claimedCredentials.length;
+      return `🎓 **${name}** — ${n} credential${n === 1 ? '' : 's'} earned`;
+    });
+    embed.addFields({ name: 'Credentials earned', value: fitFieldValue(lines) });
+  } else {
+    embed.addFields({
+      name: 'Credentials earned',
+      value: '_No completed courses yet._',
+    });
+  }
+
+  // Enrolled (in progress): enrolled courses not already completed, same filter.
+  const completedIds = new Set(state.completedCourses.map((c) => c.courseId));
+  const inProgress = state.enrolledCourses
+    .filter((id) => !completedIds.has(id))
+    .filter((id) => isDisplayed(id, filter));
+  if (inProgress.length > 0) {
+    const lines = inProgress.map((id) => `• ${displayNameFor(id, names) || id}`);
+    embed.addFields({
+      name: 'Enrolled (in progress)',
+      value: fitFieldValue(lines),
+    });
+  }
+
+  return embed;
+}
+
 // --- pure selection helpers -------------------------------------------------
 
 /**
- * Build the `course` autocomplete choices: the member's enrolled courses that
- * this server surfaces, labelled by display name. Bounded and capped to Discord
- * limits. Pure over its inputs; the I/O (dashboard read) happens in the command.
+ * Build the `course` autocomplete choices from a list of course ids the member
+ * has touched (enrolled + completed), keeping the ones this server surfaces and
+ * labelling them by display name. Bounded and capped to Discord limits. Pure over
+ * its inputs; the I/O (dashboard read) happens in the command. Surfacing completed
+ * courses too lets a member drill into the module detail of a course they finished.
  */
-export function enrolledCourseChoices(
-  enrolledCourseIds: string[],
+export function courseChoices(
+  courseIds: string[],
   filter: DisplayFilter,
   focused: string,
 ): { name: string; value: string }[] {
   const q = focused.trim().toLowerCase();
-  return enrolledCourseIds
+  return courseIds
     .filter((id) => isDisplayed(id, filter))
     .map((id) => ({ name: displayNameFor(id, filter.names) || id, value: id }))
     .filter((c) => c.name !== '' && c.value !== '')
@@ -195,8 +261,8 @@ export const data = new SlashCommandBuilder()
   .addStringOption((option) =>
     option
       .setName('course')
-      .setDescription('Choose one of your enrolled courses — start typing to pick.')
-      .setRequired(true)
+      .setDescription('Choose a course for module detail — leave blank for your credentials overview.')
+      .setRequired(false)
       .setAutocomplete(true),
   )
   .addStringOption((option) =>
@@ -239,9 +305,15 @@ export async function autocomplete(
       getUserDashboard(config.andamioApiBaseUrl, config.andamioApiKey, link.user_jwt),
       AUTOCOMPLETE_BUDGET_MS,
     );
-    await interaction.respond(
-      enrolledCourseChoices(state.enrolledCourses, filter, focused.value),
-    );
+    // Offer enrolled AND completed courses (deduped) so a member can drill into
+    // a course they've finished, not just one they're still enrolled in.
+    const courseIds = [
+      ...new Set([
+        ...state.enrolledCourses,
+        ...state.completedCourses.map((c) => c.courseId),
+      ]),
+    ];
+    await interaction.respond(courseChoices(courseIds, filter, focused.value));
   } catch (err) {
     console.error('/progress autocomplete failed:', err);
     try {
@@ -284,7 +356,38 @@ export async function execute(
   }
 
   const filter = loadDisplayFilter(config.roleMappingsPath);
-  const courseId = interaction.options.getString('course', true);
+  const courseId = interaction.options.getString('course');
+
+  // No course chosen → the credentials overview: what the member has earned
+  // across every completed course (incl. ones they've left) + what's in progress.
+  if (!courseId) {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    try {
+      const { state } = await getUserDashboard(
+        config.andamioApiBaseUrl,
+        config.andamioApiKey,
+        link.user_jwt,
+      );
+      await interaction.editReply({
+        embeds: [renderProgressOverviewEmbed(state, filter)],
+      });
+    } catch (err) {
+      if (err instanceof DashboardApiError && err.kind === 'unauthorized') {
+        console.error(
+          '/progress overview: Andamio API returned 401 for a non-expired ' +
+            'member JWT — check ANDAMIO_API_KEY:',
+          err.message,
+        );
+        await interaction.editReply({ content: VERIFY_REPLY });
+        return;
+      }
+      if (!(err instanceof DashboardApiError)) {
+        console.error('/progress overview: unexpected error:', err);
+      }
+      await interaction.editReply({ content: ERROR_REPLY });
+    }
+    return;
+  }
 
   // Reject a hand-typed, non-surfaced course before spending an API call.
   if (!isCourseSelectable(courseId, filter)) {
