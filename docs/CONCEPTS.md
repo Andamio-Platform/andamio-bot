@@ -26,6 +26,13 @@ values you produce yourself versus which ones Andamio hands you.
   within it (`slt_hash`). You put these into `role-mappings.json` to say "this
   credential unlocks this role." They are long hex strings; you do not memorize
   them, you paste them.
+- **Module (and "on-chain" content).** A course is made of modules — each a
+  learning target with a lesson and/or an assignment. A module is **published
+  (on-chain)** once it has its own top-level `slt_hash`; until then it is still a
+  draft and the bot ignores it. `/preview` lists a course's on-chain modules and
+  renders a lesson or assignment, and `/progress` shows a member's per-module
+  status across them. These are read-only views of public course content and do
+  not affect role gating — gating only ever reads earned **credentials**.
 - **Operator API key (`ANDAMIO_API_KEY`).** One secret per deployment that lets
   the bot read the Andamio API. This is the one true secret. Treat it like a
   password: never commit it, set it through your host's secret store.
