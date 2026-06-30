@@ -22,7 +22,7 @@
     "credentials"
   ],
   "author": "",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "dependencies": {
     "better-sqlite3": "^11.8.1",
     "discord.js": "^14.14.1",

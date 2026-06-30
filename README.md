@@ -160,4 +160,4 @@ see [CONTRIBUTING.md](./CONTRIBUTING.md).
 
 ## License
 
-[MIT](./LICENSE) (c) 2026 Andamio.
+[Apache License 2.0](./LICENSE) © 2026 Andamio Platform.
