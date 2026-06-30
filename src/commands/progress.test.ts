@@ -75,13 +75,15 @@ vi.mock('../discord/relogin-prompt', () => ({
 
 import {
   autocomplete,
-  enrolledCourseChoices,
+  courseChoices,
   execute,
   isCourseSelectable,
   renderOpportunitiesEmbed,
   renderProgressEmbed,
+  renderProgressOverviewEmbed,
 } from './progress';
 import { ApiError } from '../andamio/content-client';
+import { ApiError as DashboardApiError } from '../andamio/dashboard-client';
 
 // --- helpers ---------------------------------------------------------------
 
@@ -212,21 +214,60 @@ describe('renderOpportunitiesEmbed', () => {
   });
 });
 
-// --- enrolledCourseChoices / isCourseSelectable -----------------------------
+// --- courseChoices / isCourseSelectable -------------------------------------
 
-describe('enrolledCourseChoices', () => {
-  it('returns enrolled courses the server surfaces, labelled by display name', () => {
+describe('courseChoices', () => {
+  it('returns courses the server surfaces, labelled by display name', () => {
     const filter = filterOf({ [CID]: 'Andamio Issuer' }, [CID]);
-    const choices = enrolledCourseChoices([CID, OTHER], filter, '');
-    // OTHER is enrolled but not surfaced (not in names, not gated) → excluded.
+    const choices = courseChoices([CID, OTHER], filter, '');
+    // OTHER is touched but not surfaced (not in names, not gated) → excluded.
     expect(choices).toEqual([{ name: 'Andamio Issuer', value: CID }]);
   });
 
   it('narrows by the focused query (case-insensitive)', () => {
     const filter = filterOf({ [CID]: 'Andamio Issuer', [OTHER]: 'Plutus PBL' });
-    expect(enrolledCourseChoices([CID, OTHER], filter, 'plutus')).toEqual([
+    expect(courseChoices([CID, OTHER], filter, 'plutus')).toEqual([
       { name: 'Plutus PBL', value: OTHER },
     ]);
+  });
+});
+
+// --- renderProgressOverviewEmbed --------------------------------------------
+
+describe('renderProgressOverviewEmbed', () => {
+  it('lists earned credentials per completed course and in-progress courses', () => {
+    const filter = filterOf({ [CID]: 'Andamio Issuer', [OTHER]: 'Plutus PBL' });
+    const state = {
+      alias: 'alice',
+      enrolledCourses: [OTHER],
+      completedCourses: [{ courseId: CID, claimedCredentials: ['slt_a', 'slt_b'] }],
+    };
+    const embed = renderProgressOverviewEmbed(state, filter).toJSON();
+    expect(embed.title).toBe('Your Andamio Progress');
+    expect(embed.description).toContain('`alice`');
+    expect(fieldVal(embed, 'Credentials earned')).toContain(
+      '🎓 **Andamio Issuer** — 2 credentials earned',
+    );
+    expect(fieldVal(embed, 'Enrolled (in progress)')).toContain('• Plutus PBL');
+  });
+
+  it('shows a placeholder when no courses are completed', () => {
+    const filter = filterOf({ [CID]: 'Andamio Issuer' });
+    const state = { alias: 'alice', enrolledCourses: [], completedCourses: [] };
+    const embed = renderProgressOverviewEmbed(state, filter).toJSON();
+    expect(fieldVal(embed, 'Credentials earned')).toMatch(/no completed courses/i);
+  });
+
+  it('omits a course the server does not surface', () => {
+    // OTHER is completed but neither named nor gated → excluded from the overview.
+    const filter = filterOf({ [CID]: 'Andamio Issuer' }, [CID]);
+    const state = {
+      alias: 'alice',
+      enrolledCourses: [],
+      completedCourses: [{ courseId: OTHER, claimedCredentials: ['slt_x'] }],
+    };
+    const embed = renderProgressOverviewEmbed(state, filter).toJSON();
+    expect(fieldVal(embed, 'Credentials earned')).toMatch(/no completed courses/i);
   });
 });
 
@@ -252,6 +293,27 @@ describe('autocomplete', () => {
     await autocomplete(auto as never);
     expect(auto.respond).toHaveBeenCalledWith([
       { name: 'Andamio Issuer', value: CID },
+    ]);
+  });
+
+  it('also offers completed courses (deduped), so a finished course is drillable', async () => {
+    loadCourseDisplayNames.mockReturnValue({
+      [CID]: 'Andamio Issuer',
+      [OTHER]: 'Plutus PBL',
+    });
+    getUserDashboard.mockResolvedValue({
+      state: {
+        alias: 'alice',
+        enrolledCourses: [CID],
+        completedCourses: [{ courseId: OTHER, claimedCredentials: ['slt_a'] }],
+      },
+      partial: false,
+    });
+    const auto = makeAuto('');
+    await autocomplete(auto as never);
+    expect(auto.respond).toHaveBeenCalledWith([
+      { name: 'Andamio Issuer', value: CID },
+      { name: 'Plutus PBL', value: OTHER },
     ]);
   });
 
@@ -335,6 +397,51 @@ describe('execute — course guard', () => {
     expect(lastReply(chat.reply).content).toMatch(/pick a course/i);
     expect(lastReply(chat.reply).flags).toBe(MessageFlags.Ephemeral);
     expect(getCourseModules).not.toHaveBeenCalled();
+  });
+});
+
+// --- execute: overview (no course) ------------------------------------------
+
+describe('execute — credentials overview', () => {
+  it('renders the overview from the dashboard when no course is chosen', async () => {
+    loadCourseDisplayNames.mockReturnValue({ [CID]: 'Andamio Issuer' });
+    getUserDashboard.mockResolvedValue({
+      state: {
+        alias: 'alice',
+        enrolledCourses: [],
+        completedCourses: [{ courseId: CID, claimedCredentials: ['slt_a', 'slt_b'] }],
+      },
+      partial: false,
+    });
+    const chat = makeChat(null);
+    await execute(chat as never);
+    expect(chat.deferReply).toHaveBeenCalledWith({ flags: MessageFlags.Ephemeral });
+    const embed = embedJson(lastReply(chat.editReply));
+    expect(embed.title).toBe('Your Andamio Progress');
+    expect(fieldVal(embed, 'Credentials earned')).toContain(
+      '🎓 **Andamio Issuer** — 2 credentials earned',
+    );
+    // The overview path reads the dashboard, not the per-course module endpoints.
+    expect(getCourseModules).not.toHaveBeenCalled();
+    expect(getAssignmentCommitments).not.toHaveBeenCalled();
+  });
+
+  it('shows the neutral verify message on a 401 in the overview', async () => {
+    getUserDashboard.mockRejectedValue(
+      new DashboardApiError('unauthorized', '401', 401),
+    );
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const chat = makeChat(null);
+    await execute(chat as never);
+    expect(lastReply(chat.editReply).content).toMatch(/trouble verifying/i);
+    errSpy.mockRestore();
+  });
+
+  it('shows a friendly try-again on a non-401 dashboard error', async () => {
+    getUserDashboard.mockRejectedValue(new DashboardApiError('network', 'down'));
+    const chat = makeChat(null);
+    await execute(chat as never);
+    expect(lastReply(chat.editReply).content).toMatch(/could not reach andamio/i);
   });
 });
 
