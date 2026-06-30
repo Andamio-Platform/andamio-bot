@@ -4,7 +4,7 @@
  * `reevaluateMember(discordId)` is the single entry point fired after any event
  * that may change a member's desired roles:
  *   - a successful `/login` link (U3)
- *   - `/refresh` (U5)
+ *   - `/check` (U5)
  *   - `guildMemberAdd` (U5)
  *   - the periodic sweep, via `reevaluateAll()` (U5)
  *
@@ -168,7 +168,7 @@ const failedOutcome: ReevaluationOutcome = { status: 'failed', failed: [] };
  *     none. Connecting is required to earn credential roles.
  *   - Member connected but with NO usable JWT (never captured, or expired) →
  *     leave roles unchanged. End-user JWTs cannot be refreshed unattended, so
- *     this member simply re-gates the next time they `/login` or `/refresh`
+ *     this member simply re-gates the next time they `/login` or `/check`
  *     (where the Connect button is offered). No role churn on a stale token.
  *   - Member connected with a valid JWT → read the dashboard, diff, apply. Only
  *     an authoritative, complete success (HTTP 200) ever removes roles. A
@@ -200,7 +200,7 @@ export async function reevaluateMember(
     }
 
     // Connected but no usable JWT → cannot read state unattended; leave roles
-    // as-is (re-gates on next interactive /login or /refresh).
+    // as-is (re-gates on next interactive /login or /check).
     if (!link.user_jwt || isExpired(link.jwt_expires_at)) {
       return skipped;
     }
