@@ -1,6 +1,14 @@
 node_modules/
 dist/
+
+# Env files: ignore every variant (.env, .env.local, .env.bak, .env.production…)
+# so a stray copy or backup can never be committed. This repo is a public
+# template — a real ANDAMIO_API_KEY or DISCORD_TOKEN in a fork would be exposed
+# to everyone. The committed template is the one deliberate exception.
 .env
+.env.*
+!.env.example
+
 .DS_Store
 *.log
 
