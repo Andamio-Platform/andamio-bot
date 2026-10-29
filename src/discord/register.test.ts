@@ -4,7 +4,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 const put = vi.fn().mockResolvedValue(undefined);
 const setToken = vi.fn().mockReturnThis();
 vi.mock('discord.js', () => ({
-  REST: vi.fn(() => ({ setToken, put })),
+  // A `function`, not an arrow: the helper calls `new REST()`.
+  REST: vi.fn(function () {
+    return { setToken, put };
+  }),
   Routes: {
     applicationGuildCommands: (appId: string, guildId: string) =>
       `/applications/${appId}/guilds/${guildId}/commands`,
