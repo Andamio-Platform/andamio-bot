@@ -82,6 +82,35 @@ export function deleteLink(db: Db, discordId: string): void {
   db.prepare(`DELETE FROM links WHERE discord_id = ?`).run(discordId);
 }
 
+/**
+ * Clear every stored user JWT that expires at or before `cutoffMs` (epoch ms),
+ * keeping the link itself. A cleared token reads the same as an expired one
+ * (`isExpired(null)` is true), so the member keeps getting the reconnect
+ * prompt. A token with no recorded expiry is unusable and is cleared too.
+ * Returns the number of links cleared.
+ */
+export function clearExpiredJwts(db: Db, cutoffMs: number): number {
+  return db
+    .prepare(
+      `UPDATE links SET user_jwt = NULL, jwt_expires_at = NULL
+       WHERE (user_jwt IS NOT NULL OR jwt_expires_at IS NOT NULL)
+         AND (jwt_expires_at IS NULL OR jwt_expires_at <= ?)`,
+    )
+    .run(cutoffMs).changes;
+}
+
+/**
+ * Delete everything the bot keeps for a member who has left the server: their
+ * link and any pending logins. Deny-list rows are kept on purpose, so a blocked
+ * member can't leave and rejoin to get the role back.
+ */
+export function deleteMemberData(db: Db, discordId: string): void {
+  db.transaction((d: string) => {
+    db.prepare(`DELETE FROM links WHERE discord_id = ?`).run(d);
+    db.prepare(`DELETE FROM pending_logins WHERE discord_id = ?`).run(d);
+  })(discordId);
+}
+
 // --- pending logins -----------------------------------------------------
 
 /**
@@ -118,4 +147,18 @@ export function getPendingByState(db: Db, state: string): PendingLogin | null {
 /** Delete the pending login for a state. No-op if it does not exist. */
 export function deletePending(db: Db, state: string): void {
   db.prepare(`DELETE FROM pending_logins WHERE state = ?`).run(state);
+}
+
+/**
+ * Delete pending logins created before `cutoffMs` (epoch ms): logins the member
+ * started but never finished, which can no longer be completed. A row with no
+ * `created_at` can never pass the TTL check either, so it goes too. Returns the
+ * number of rows deleted.
+ */
+export function deleteStalePending(db: Db, cutoffMs: number): number {
+  return db
+    .prepare(
+      `DELETE FROM pending_logins WHERE created_at IS NULL OR created_at < ?`,
+    )
+    .run(cutoffMs).changes;
 }

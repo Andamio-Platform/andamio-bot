@@ -9,7 +9,11 @@ import {
   createPending,
   getPendingByState,
   deletePending,
+  clearExpiredJwts,
+  deleteMemberData,
+  deleteStalePending,
 } from './links';
+import { upsertDenial, listDenials } from './denials';
 
 describe('db migration', () => {
   it('creates the schema and is idempotent (running twice does not error)', () => {
@@ -168,5 +172,138 @@ describe('pending-login helpers', () => {
     createPending(db, 'state-xyz', 'discord-2');
     deletePending(db, 'state-xyz');
     expect(getPendingByState(db, 'state-xyz')).toBeNull();
+  });
+});
+
+describe('clearExpiredJwts', () => {
+  let db: Db;
+  const NOW = 1_700_000_000_000;
+
+  beforeEach(() => {
+    db = openDb(':memory:');
+  });
+
+  afterEach(() => {
+    db.close();
+  });
+
+  it('clears an expired token but keeps the link', () => {
+    upsertLink(db, 'd1', 'alice', null, 'h.p.s', NOW - 1);
+    expect(clearExpiredJwts(db, NOW)).toBe(1);
+    const link = getLinkByDiscordId(db, 'd1');
+    expect(link).toMatchObject({ alias: 'alice', user_jwt: null, jwt_expires_at: null });
+  });
+
+  it('clears a token expiring exactly at the cutoff', () => {
+    upsertLink(db, 'd1', 'alice', null, 'h.p.s', NOW);
+    expect(clearExpiredJwts(db, NOW)).toBe(1);
+    expect(getLinkByDiscordId(db, 'd1')?.user_jwt).toBeNull();
+  });
+
+  it('leaves a not-yet-expired token untouched', () => {
+    upsertLink(db, 'd1', 'alice', null, 'h.p.s', NOW + 60_000);
+    expect(clearExpiredJwts(db, NOW)).toBe(0);
+    expect(getLinkByDiscordId(db, 'd1')).toMatchObject({
+      user_jwt: 'h.p.s',
+      jwt_expires_at: NOW + 60_000,
+    });
+  });
+
+  it('is a no-op on an already-cleared token', () => {
+    upsertLink(db, 'd1', 'alice', null, null, null);
+    expect(clearExpiredJwts(db, NOW)).toBe(0);
+    expect(getLinkByDiscordId(db, 'd1')).toMatchObject({
+      alias: 'alice',
+      user_jwt: null,
+      jwt_expires_at: null,
+    });
+  });
+
+  it('clears a token with no recorded expiry (unusable)', () => {
+    upsertLink(db, 'd1', 'alice', null, 'h.p.s', null);
+    expect(clearExpiredJwts(db, NOW)).toBe(1);
+    expect(getLinkByDiscordId(db, 'd1')?.user_jwt).toBeNull();
+  });
+
+  it('only clears the expired links among several', () => {
+    upsertLink(db, 'd1', 'alice', null, 'old', NOW - 1);
+    upsertLink(db, 'd2', 'bob', null, 'new', NOW + 60_000);
+    expect(clearExpiredJwts(db, NOW)).toBe(1);
+    expect(getLinkByDiscordId(db, 'd1')?.user_jwt).toBeNull();
+    expect(getLinkByDiscordId(db, 'd2')?.user_jwt).toBe('new');
+  });
+});
+
+describe('deleteMemberData', () => {
+  let db: Db;
+
+  beforeEach(() => {
+    db = openDb(':memory:');
+  });
+
+  afterEach(() => {
+    db.close();
+  });
+
+  it('deletes the link and pending logins but keeps denials', () => {
+    upsertLink(db, 'd1', 'alice', null, 'h.p.s', Date.now() + 60_000);
+    createPending(db, 'state-1', 'd1');
+    upsertDenial(db, 'd1', 'r1', 'spam', 'mod-1');
+
+    deleteMemberData(db, 'd1');
+
+    expect(getLinkByDiscordId(db, 'd1')).toBeNull();
+    expect(getPendingByState(db, 'state-1')).toBeNull();
+    expect(listDenials(db, 'd1')).toHaveLength(1);
+  });
+
+  it("leaves other members' rows alone", () => {
+    upsertLink(db, 'd1', 'alice');
+    upsertLink(db, 'd2', 'bob');
+    createPending(db, 'state-2', 'd2');
+
+    deleteMemberData(db, 'd1');
+
+    expect(getLinkByDiscordId(db, 'd2')).not.toBeNull();
+    expect(getPendingByState(db, 'state-2')).not.toBeNull();
+  });
+
+  it('is a no-op for a member with no data', () => {
+    expect(() => deleteMemberData(db, 'nobody')).not.toThrow();
+  });
+});
+
+describe('deleteStalePending', () => {
+  let db: Db;
+
+  beforeEach(() => {
+    db = openDb(':memory:');
+  });
+
+  afterEach(() => {
+    db.close();
+  });
+
+  it('deletes logins created before the cutoff and keeps newer ones', () => {
+    createPending(db, 'old', 'd1');
+    createPending(db, 'new', 'd2');
+    db.prepare(`UPDATE pending_logins SET created_at = 1000 WHERE state = 'old'`).run();
+    db.prepare(`UPDATE pending_logins SET created_at = 3000 WHERE state = 'new'`).run();
+
+    expect(deleteStalePending(db, 2000)).toBe(1);
+    expect(getPendingByState(db, 'old')).toBeNull();
+    expect(getPendingByState(db, 'new')).not.toBeNull();
+  });
+
+  it('keeps a login created exactly at the cutoff', () => {
+    createPending(db, 's', 'd1');
+    db.prepare(`UPDATE pending_logins SET created_at = 2000`).run();
+    expect(deleteStalePending(db, 2000)).toBe(0);
+  });
+
+  it('deletes a login with no created_at', () => {
+    createPending(db, 's', 'd1');
+    db.prepare(`UPDATE pending_logins SET created_at = NULL`).run();
+    expect(deleteStalePending(db, 2000)).toBe(1);
   });
 });

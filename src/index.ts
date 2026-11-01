@@ -8,6 +8,7 @@ import {
   Collection,
   Events,
   GatewayIntentBits,
+  Partials,
   RESTPostAPIApplicationCommandsJSONBody,
 } from 'discord.js';
 
@@ -15,7 +16,12 @@ import { loadConfig } from './config';
 import { openDb } from './db/index';
 import { setDb } from './db/handle';
 import { loadMappings } from './gating/mappings';
-import { initGating, reevaluateAll, reevaluateMember } from './gating/triggers';
+import {
+  initGating,
+  onMemberLeft,
+  reevaluateAll,
+  reevaluateMember,
+} from './gating/triggers';
 import { startCallbackServer } from './web/server';
 import { isCommandModule } from './command-loader';
 import { registerGuildCommands } from './discord/register';
@@ -102,6 +108,9 @@ function main(): void {
 
   const client = new BotClient({
     intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers],
+    // Without this, discord.js only emits GuildMemberRemove for cached members,
+    // so a leave right after a restart would be missed.
+    partials: [Partials.GuildMember],
   });
 
   // Wire the gating triggers with their runtime dependencies (mirrors setDb).
@@ -152,6 +161,11 @@ function main(): void {
     reevaluateMember(member.id).catch((err) =>
       console.error('Gating: guildMemberAdd re-evaluation failed:', err),
     );
+  });
+
+  // Drop a member's link and pending logins when they leave the guild.
+  client.on(Events.GuildMemberRemove, (member) => {
+    onMemberLeft(member.guild.id, member.id);
   });
 
   client.on(Events.InteractionCreate, async (interaction) => {
