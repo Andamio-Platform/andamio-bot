@@ -83,6 +83,18 @@ alone. `MOD_ROLE_ID` is optional; absent means "Manage Roles only."
 The datastore is SQLite (file-based, zero-ops). Commands register themselves on
 boot, so a deploy is all it takes to add, rename, or remove one.
 
+## What the bot stores
+
+The bot keeps only what gating needs, and deletes each piece once it has no use
+for it:
+
+| Data | Why it is kept | When it is deleted |
+|---|---|---|
+| Login token (`links.user_jwt`, `links.jwt_expires_at`) | Lets the periodic sweep read the member's credentials without the member doing anything. | When it expires. The sweep clears it, and the member is asked to reconnect. |
+| Link (`links`: Discord ID and Andamio alias) | Ties the Discord member to their Andamio alias. | When the member runs `/logout` or leaves the server. A member who leaves while the bot is offline is caught by the next sweep. |
+| Pending login (`pending_logins`: login state and Discord ID) | Matches the login callback to the member who started it. | When the login completes, when the member starts a new `/login`, or when they leave the server. An unfinished login is deleted by the first sweep after it expires (10 minutes). |
+| Deny-list entry (`denials`) | Keeps a blocked member from regaining a role. | When a moderator runs `/allow`. Kept when the member leaves, so leaving and rejoining does not lift a block. |
+
 ## Configure credential gating (`role-mappings.json`)
 
 `config/role-mappings.json` decides **which Andamio credential unlocks which

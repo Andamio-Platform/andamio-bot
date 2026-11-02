@@ -18,11 +18,17 @@
  * commands. Until `initGating` runs, the triggers are a safe no-op.
  */
 
-import type { Client, GuildMember } from 'discord.js';
+import { RESTJSONErrorCodes, type Client, type GuildMember } from 'discord.js';
 
 import type { Config } from '../config';
 import { getDb } from '../db/handle';
-import { getAllLinks, getLinkByDiscordId } from '../db/links';
+import {
+  clearExpiredJwts,
+  deleteMemberData,
+  deleteStalePending,
+  getAllLinks,
+  getLinkByDiscordId,
+} from '../db/links';
 import { getDeniedRoleIds } from '../db/denials';
 import {
   getUserDashboard,
@@ -30,6 +36,7 @@ import {
   type UserState,
 } from '../andamio/dashboard-client';
 import { isExpired } from '../andamio/jwt';
+import { PENDING_TTL_MS } from '../andamio/login';
 import { evaluate, unconnectedDiff, type RoleDiff } from './evaluator';
 import type { Mappings } from './mappings';
 
@@ -79,25 +86,63 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
 }
 
 /**
- * Resolve a guild member by Discord id, or `null` if they aren't in the guild
- * (left, or never joined) — or if the fetch hangs past the timeout. The timeout
- * matters for the periodic sweep: a Discord fetch that never settles would
- * otherwise pin the re-entrancy guard and silently stop all gating.
+ * Discord error codes that mean the member is definitely not in the guild
+ * (Unknown User covers a deleted account).
+ */
+const MEMBER_GONE_CODES = new Set<number>([
+  RESTJSONErrorCodes.UnknownMember,
+  RESTJSONErrorCodes.UnknownUser,
+]);
+
+/** True when `err` is Discord's authoritative "this member is not here" answer. */
+function isMemberGone(err: unknown): boolean {
+  const code = (err as { code?: unknown } | null)?.code;
+  return typeof code === 'number' && MEMBER_GONE_CODES.has(code);
+}
+
+/**
+ * Result of a guild-member lookup. `gone` is only Discord's explicit
+ * unknown-member/user answer; a missing guild, a timeout, or any other error is
+ * `unavailable`, because those say nothing about whether the member left.
+ */
+type MemberLookup =
+  | { kind: 'member'; member: GuildMember }
+  | { kind: 'gone' }
+  | { kind: 'unavailable' };
+
+/**
+ * Resolve a guild member by Discord id. The timeout matters for the periodic
+ * sweep: a Discord fetch that never settles would otherwise pin the
+ * re-entrancy guard and silently stop all gating.
  */
 async function fetchMember(
   deps: GatingDeps,
   discordId: string,
-): Promise<GuildMember | null> {
+): Promise<MemberLookup> {
   const guild = deps.client.guilds.cache.get(deps.config.guildId);
-  if (!guild) return null;
+  if (!guild) return { kind: 'unavailable' };
   try {
-    return await withTimeout(
+    const member = await withTimeout(
       guild.members.fetch(discordId),
       FETCH_MEMBER_TIMEOUT_MS,
     );
-  } catch {
-    // Unknown member (10007), fetch failure, or timeout → treat as not present.
-    return null;
+    return member ? { kind: 'member', member } : { kind: 'unavailable' };
+  } catch (err) {
+    return isMemberGone(err) ? { kind: 'gone' } : { kind: 'unavailable' };
+  }
+}
+
+/**
+ * Handle a member leaving the server: delete their link and pending logins
+ * (deny-list rows stay). Ignores leaves from any guild other than the gated
+ * one. Never throws.
+ */
+export function onMemberLeft(guildId: string, discordId: string): void {
+  if (!deps || guildId !== deps.config.guildId) return;
+  try {
+    deleteMemberData(getDb(), discordId);
+  } catch (err) {
+    console.error(`Gating: failed to delete data for departed ${discordId}:`, err);
   }
 }
 
@@ -163,7 +208,12 @@ const failedOutcome: ReevaluationOutcome = { status: 'failed', failed: [] };
  *
  * Behaviour:
  *   - Gating not initialised → no-op.
- *   - Member not in the guild → no-op (nothing to apply roles to).
+ *   - Discord says the member is not in the guild (unknown member/user) →
+ *     delete their link and pending logins (deny-list rows stay). This runs
+ *     on every caller (sweep, login callback, `/check`, `/deny`, `/allow`,
+ *     rejoin), and catches anyone who left while the bot was offline.
+ *   - Member lookup failed otherwise (timeout, other error, guild not cached)
+ *     → no-op; that says nothing about whether they left.
  *   - Member UNCONNECTED (no link) → remove any managed roles they hold, add
  *     none. Connecting is required to earn credential roles.
  *   - Member connected but with NO usable JWT (never captured, or expired) →
@@ -187,8 +237,15 @@ export async function reevaluateMember(
   const d = deps;
 
   try {
-    const member = await fetchMember(d, discordId);
-    if (!member) return skipped;
+    const lookup = await fetchMember(d, discordId);
+    if (lookup.kind === 'gone') {
+      // Left while the bot wasn't watching (e.g. it was offline): the leave
+      // event never fired, so drop their data here instead.
+      deleteMemberData(getDb(), discordId);
+      return skipped;
+    }
+    if (lookup.kind !== 'member') return skipped;
+    const member = lookup.member;
 
     const currentRoles = member.roles.cache.map((r) => r.id);
     const link = getLinkByDiscordId(getDb(), discordId);
@@ -276,8 +333,9 @@ export async function gateMemberFromState(
   if (!deps) return skipped;
   const d = deps;
   try {
-    const member = await fetchMember(d, discordId);
-    if (!member) return skipped;
+    const lookup = await fetchMember(d, discordId);
+    if (lookup.kind !== 'member') return skipped;
+    const member = lookup.member;
     const currentRoles = member.roles.cache.map((r) => r.id);
     // Same deny-list subtraction as the sweep, so a member cannot `/check`
     // their way back into a denied role.
@@ -314,6 +372,16 @@ export async function reevaluateAll(): Promise<void> {
   }
   sweepInProgress = true;
   try {
+    // An expired token can't be used again (the member must reconnect), and an
+    // abandoned login can't be completed, so don't keep either. Links stay.
+    // A cleanup failure must not cost the member loop its tick.
+    try {
+      const now = Date.now();
+      clearExpiredJwts(getDb(), now);
+      deleteStalePending(getDb(), now - PENDING_TTL_MS);
+    } catch (err) {
+      console.error('Gating: sweep cleanup failed:', err);
+    }
     const links = getAllLinks(getDb());
     for (const link of links) {
       await reevaluateMember(link.discord_id);

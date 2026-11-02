@@ -9,9 +9,15 @@ vi.mock('../db/handle', () => ({ getDb: () => getDb() }));
 
 const getLinkByDiscordId = vi.fn();
 const getAllLinks = vi.fn(() => [] as unknown[]);
+const clearExpiredJwts = vi.fn();
+const deleteMemberData = vi.fn();
+const deleteStalePending = vi.fn();
 vi.mock('../db/links', () => ({
+  deleteStalePending: (...a: unknown[]) => deleteStalePending(...a),
   getLinkByDiscordId: (...a: unknown[]) => getLinkByDiscordId(...a),
   getAllLinks: () => getAllLinks(),
+  clearExpiredJwts: (...a: unknown[]) => clearExpiredJwts(...a),
+  deleteMemberData: (...a: unknown[]) => deleteMemberData(...a),
 }));
 
 const getDeniedRoleIds = vi.fn(() => new Set<string>());
@@ -33,10 +39,12 @@ import {
   reevaluateMember,
   reevaluateAll,
   gateMemberFromState,
+  onMemberLeft,
   initGating,
   resetGating,
 } from './triggers';
 import { ApiError, type UserState } from '../andamio/dashboard-client';
+import { PENDING_TTL_MS } from '../andamio/login';
 
 // --- helpers ---------------------------------------------------------------
 
@@ -100,6 +108,9 @@ const state = (over: Partial<UserState> = {}): UserState => ({
 beforeEach(() => {
   getLinkByDiscordId.mockReset();
   getAllLinks.mockReset().mockReturnValue([]);
+  clearExpiredJwts.mockReset();
+  deleteMemberData.mockReset();
+  deleteStalePending.mockReset();
   getUserDashboard.mockReset();
   getDeniedRoleIds.mockReset().mockReturnValue(new Set());
 });
@@ -264,6 +275,8 @@ describe('reevaluateMember (dashboard model)', () => {
     expect(getUserDashboard).not.toHaveBeenCalled();
     expect(member.roles.add).not.toHaveBeenCalled();
     expect(member.roles.remove).not.toHaveBeenCalled();
+    // A failed fetch says nothing about whether they left: keep their data.
+    expect(deleteMemberData).not.toHaveBeenCalled();
   });
 
   it('not initialised → safe no-op (skipped)', async () => {
@@ -410,5 +423,132 @@ describe('reevaluateAll (sweep)', () => {
     // re-entrant tick added nothing. Asserting the exact total after completion
     // is timing-robust (the first sweep awaits a member fetch before its read).
     expect(getUserDashboard).toHaveBeenCalledTimes(1);
+  });
+});
+
+// --- member left (#34) -------------------------------------------------------
+
+function wireFetchError(err: unknown) {
+  const guild = { members: { fetch: vi.fn().mockRejectedValue(err) } };
+  const client = { guilds: { cache: { get: vi.fn(() => guild) } } };
+  initGating({
+    client,
+    config: { guildId: 'g1', andamioApiBaseUrl: 'https://api.test', andamioApiKey: 'k' },
+    mappings: CRED_MAPPINGS,
+  } as never);
+}
+
+const discordError = (code: number) => Object.assign(new Error('discord'), { code });
+
+describe('reevaluateMember for a member who left while the bot was offline', () => {
+  it.each([10007, 10013])(
+    'Discord code %i (unknown member/user) → deletes their data, no reads',
+    async (code) => {
+      wireFetchError(discordError(code));
+      getLinkByDiscordId.mockReturnValue(validLink());
+
+      await expect(reevaluateMember('d1')).resolves.toMatchObject({ status: 'skipped' });
+      expect(deleteMemberData).toHaveBeenCalledWith(expect.anything(), 'd1');
+      expect(getUserDashboard).not.toHaveBeenCalled();
+    },
+  );
+
+  it('any other Discord error code → keeps their data', async () => {
+    wireFetchError(discordError(50001)); // Missing Access
+    await reevaluateMember('d1');
+    expect(deleteMemberData).not.toHaveBeenCalled();
+  });
+
+  it('guild not cached → keeps their data', async () => {
+    const client = { guilds: { cache: { get: vi.fn(() => undefined) } } };
+    initGating({
+      client,
+      config: { guildId: 'g1', andamioApiBaseUrl: 'https://api.test', andamioApiKey: 'k' },
+      mappings: CRED_MAPPINGS,
+    } as never);
+    await reevaluateMember('d1');
+    expect(deleteMemberData).not.toHaveBeenCalled();
+  });
+
+  it('a gone member during the sweep has their data deleted', async () => {
+    wireFetchError(discordError(10007));
+    getAllLinks.mockReturnValue([{ discord_id: 'd1' }]);
+    await reevaluateAll();
+    expect(deleteMemberData).toHaveBeenCalledWith(expect.anything(), 'd1');
+  });
+});
+
+describe('reevaluateAll clears expired tokens and stale logins', () => {
+  it('clears expired JWTs as of now', async () => {
+    wire(makeMember([]));
+    const before = Date.now();
+    await reevaluateAll();
+    const after = Date.now();
+    expect(clearExpiredJwts).toHaveBeenCalledTimes(1);
+    const cutoff = clearExpiredJwts.mock.calls[0][1] as number;
+    expect(cutoff).toBeGreaterThanOrEqual(before);
+    expect(cutoff).toBeLessThanOrEqual(after);
+  });
+
+  it('a cleanup failure is logged and the sweep still visits links', async () => {
+    wireFetchError(discordError(10007));
+    clearExpiredJwts.mockImplementation(() => {
+      throw new Error('SQLITE_BUSY');
+    });
+    getAllLinks.mockReturnValue([{ discord_id: 'd1' }]);
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await reevaluateAll();
+
+    expect(errSpy).toHaveBeenCalledWith('Gating: sweep cleanup failed:', expect.any(Error));
+    expect(deleteMemberData).toHaveBeenCalledWith(expect.anything(), 'd1');
+    errSpy.mockRestore();
+  });
+
+  it('deletes pending logins older than the login TTL', async () => {
+    wire(makeMember([]));
+    const before = Date.now();
+    await reevaluateAll();
+    const after = Date.now();
+    expect(deleteStalePending).toHaveBeenCalledTimes(1);
+    const cutoff = deleteStalePending.mock.calls[0][1] as number;
+    expect(cutoff).toBeGreaterThanOrEqual(before - PENDING_TTL_MS);
+    expect(cutoff).toBeLessThanOrEqual(after - PENDING_TTL_MS);
+  });
+
+  it('not initialised → does not touch the db', async () => {
+    resetGating();
+    await reevaluateAll();
+    expect(clearExpiredJwts).not.toHaveBeenCalled();
+    expect(deleteStalePending).not.toHaveBeenCalled();
+  });
+});
+
+describe('onMemberLeft', () => {
+  it('a leave from the gated guild deletes their data', () => {
+    wire(makeMember([]));
+    onMemberLeft('g1', 'd1');
+    expect(deleteMemberData).toHaveBeenCalledWith(expect.anything(), 'd1');
+  });
+
+  it('a leave from another guild is ignored', () => {
+    wire(makeMember([]));
+    onMemberLeft('other-guild', 'd1');
+    expect(deleteMemberData).not.toHaveBeenCalled();
+  });
+
+  it('not initialised → no-op', () => {
+    resetGating();
+    onMemberLeft('g1', 'd1');
+    expect(deleteMemberData).not.toHaveBeenCalled();
+  });
+
+  it('a db failure is logged, not thrown', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    wire(makeMember([]));
+    deleteMemberData.mockImplementation(() => {
+      throw new Error('disk');
+    });
+    expect(() => onMemberLeft('g1', 'd1')).not.toThrow();
   });
 });
